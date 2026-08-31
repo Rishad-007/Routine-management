@@ -110,14 +110,22 @@ Seed file: `supabase/seed.sql` — default super admin + sample classes/sections
 - `lib/routine-view.ts`: `buildSectionMatrix` + `buildTeacherMatrix`
 - Build verified (routes: /, /routine, /teacher, /teachers)
 
-### Phase 6 — Admin Routine Builder
-- Editable full-week grid
-- Click-to-assign + drag & drop (`@dnd-kit`)
-- Conflict badges, busy-in-period warning, force override
-- Optimistic save + toasts
+### Phase 6 — Admin Routine Builder ✅
+- `/admin/routine` page + `RoutineBuilder` editable Days×Periods grid
+- Click a cell → editor panel to assign subject (→ teacher filtered by subject/open) + room; Clear button
+- Drag & drop via `@dnd-kit` (grip handle) to swap assignments between periods within a day
+- `saveSectionRoutine` server action: simulates the full routine set, detects busy (double-booked same period across sections → red) + overload (yellow/red daily load), returns warnings; blocks save unless "Save anyway" (force) via toast action
+- Save does transactional delete+insert for the section (composite unique `section_id,day,period_number`)
+- Optimistic-less but clean: invalidates queries + router.refresh on success
+- Build verified (route: /admin/routine)
 
-### Phase 7 — Adjust Routine + PDF
-- Date-scoped overlay (base routine + adjustments)
+### Phase 7 — Adjust Routine + PDF ✅
+- `/admin/adjust` page + `AdjustBuilder`: pick class/section + date, shows that date's day (Sun–Thu) with base subject/teacher per period, existing adjustments overlaid
+- Per-period substitute-teacher dropdown + optional note + reset; "applies only to this date" banner; weekend guard
+- `saveDayAdjustments` action: delete-then-insert date-scoped `adjustments` rows (original tracked from base routine)
+- `getAdjustments()` added to `data.ts`
+- PDF export: `/api/routine.pdf?section=ID` using `@react-pdf/renderer` (nodejs runtime, dynamic import), A4 landscape weekly grid; "PDF" button added to public RoutineViewer
+- Build verified (routes: /admin/adjust, /api/routine.pdf)
 - Adjust via Teacher OR Class+Section
 - PDF report via route handler (`@react-pdf/renderer`)
 

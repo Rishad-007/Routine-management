@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Download } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -82,11 +83,19 @@ export function RoutineViewer({
 
       {matrix ? (
         <Card>
-          <CardHeader className="pb-3">
+          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
             <CardTitle className="text-lg text-[#1e3a5f]">
               {classes.find((c) => c.id === classId)?.name} — Section{" "}
               {sections.find((s) => s.id === sectionId)?.name}
             </CardTitle>
+            <a
+              href={`/api/routine.pdf?section=${sectionId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 rounded-lg bg-[#0d9488] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0b7a70]"
+            >
+              <Download className="h-4 w-4" /> PDF
+            </a>
           </CardHeader>
           <CardContent className="pt-0">
             <RoutineGrid matrix={matrix} season={season} />

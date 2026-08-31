@@ -8,6 +8,7 @@ import {
   type TeacherSubjectRow,
   type RoomRow,
   type RoutineRow,
+  type AdjustmentRow,
   type SettingsRow,
 } from "./types";
 
@@ -65,6 +66,12 @@ export async function getRoutines(sectionId?: string): Promise<RoutineRow[]> {
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return (data as RoutineRow[]) ?? [];
+}
+
+export async function getAdjustments(): Promise<AdjustmentRow[]> {
+  const { data, error } = await db().from("adjustments").select("*");
+  if (error) throw new Error(error.message);
+  return (data as AdjustmentRow[]) ?? [];
 }
 
 export async function getSettings(): Promise<SettingsRow[]> {
