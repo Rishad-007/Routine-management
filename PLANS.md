@@ -88,10 +88,11 @@ Seed file: `supabase/seed.sql` — default super admin + sample classes/sections
 - `/admin/layout.tsx` session guard, admin nav, logout
 - Admin dashboard with stats
 
-### Phase 3 — Master Data CRUD
-- Classes, Sections, Rooms, Subjects, Teachers, Admins
-- Validation, auto-suggest, search, delete confirm
-- Server Actions with service-role client
+### Phase 3 — Master Data CRUD ✅
+- Server actions in `app/admin/master-data/actions.ts` (auth-wrapped, service-role writes)
+- Tabbed UI: Classes, Sections, Rooms, Subjects, Teachers, Admins
+- Validation, search, edit/delete confirmations, multi-select subjects, open-teacher toggle
+- Super admin can create/delete admins; self-delete blocked
 
 ### Phase 4 — Period + Conflict Engine
 - `lib/periods.ts` season-aware schedule
