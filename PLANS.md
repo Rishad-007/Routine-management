@@ -101,10 +101,14 @@ Seed file: `supabase/seed.sql` — default super admin + sample classes/sections
 - `lib/conflicts.ts` — consecutive (≥3 yellow, ≥4 red) + daily-total (≥5 yellow, ≥6 red) warnings; teacher-busy-across-sections; weekly load
 - Verified with runtime tests against spec timings
 
-### Phase 5 — Public Routine Views
-- Home + live current-period card + search
-- Class+Section routine grid
-- Teacher routine grid + Teachers directory
+### Phase 5 — Public Routine Views ✅
+- `(public)` route group + `PublicHeader` (Home / Class Routine / Teacher Routine / Teachers)
+- Home: live "Currently Running" card (`CurrentPeriodCard` + `useCurrentPeriod`), class→section quick picker → `/routine?section=`, teacher cards grid
+- Class routine: `RoutineViewer` (class+section selects) + `RoutineGrid` Days×Periods matrix with Tiffin separator after P4 and live current-period highlight
+- Teacher routine: `TeacherRoutineViewer` (search by code/name) + compact matrix showing class-section per period
+- Teachers directory: `TeachersDirectory` searchable cards → link to teacher routine
+- `lib/routine-view.ts`: `buildSectionMatrix` + `buildTeacherMatrix`
+- Build verified (routes: /, /routine, /teacher, /teachers)
 
 ### Phase 6 — Admin Routine Builder
 - Editable full-week grid
