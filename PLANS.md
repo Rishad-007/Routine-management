@@ -74,15 +74,19 @@ Seed file: `supabase/seed.sql` — default super admin + sample classes/sections
 - Write planning/config/credential files
 - Set up folder structure
 
-### Phase 1 — Database Schema + Supabase clients
+### Phase 1 — Database Schema + Supabase clients ✅
 - Write `supabase/schema.sql` + `supabase/seed.sql`
-- Supabase client factories (browser / SSR / service-role)
-- User runs schema in Supabase, provides URL + keys
+- Supabase client factories (browser `client.ts` / SSR `server.ts` / service-role `admin.ts`)
+- Data-access layer `lib/data.ts`, types, constants, query provider
+- User provides Supabase URL + keys (env vars filled in `.env.local`)
+- ⚠️ schema.sql + seed.sql still need to be RUN in Supabase SQL Editor
 
-### Phase 2 — Auth
-- Session creation, HTTP-only cookie
-- Login page, middleware, admin layout guard
-- Super admin seeded via `seed.sql` / first-run script
+### Phase 2 — Auth ✅
+- `lib/auth.ts` — signed HTTP-only `school_session` cookie (HMAC + expiry), bcrypt verify
+- Login page + server action
+- `middleware.ts` protecting `/admin/*`, `/login` redirect
+- `/admin/layout.tsx` session guard, admin nav, logout
+- Admin dashboard with stats
 
 ### Phase 3 — Master Data CRUD
 - Classes, Sections, Rooms, Subjects, Teachers, Admins
