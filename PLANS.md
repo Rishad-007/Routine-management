@@ -94,10 +94,12 @@ Seed file: `supabase/seed.sql` — default super admin + sample classes/sections
 - Validation, search, edit/delete confirmations, multi-select subjects, open-teacher toggle
 - Super admin can create/delete admins; self-delete blocked
 
-### Phase 4 — Period + Conflict Engine
-- `lib/periods.ts` season-aware schedule
-- `useCurrentPeriod` hook
-- `lib/conflicts.ts` consecutive/daily conflict detection
+### Phase 4 — Period + Conflict Engine ✅
+- `lib/periods.ts` season-aware schedule (summer start 08:30, winter 09:10; same durations/gaps, tiffin after period 4)
+- `getCurrentPeriod` + `getSchoolDayIndex` helpers
+- `useCurrentPeriod` live hook (30s tick), `useSeason` query hook
+- `lib/conflicts.ts` — consecutive (≥3 yellow, ≥4 red) + daily-total (≥5 yellow, ≥6 red) warnings; teacher-busy-across-sections; weekly load
+- Verified with runtime tests against spec timings
 
 ### Phase 5 — Public Routine Views
 - Home + live current-period card + search
