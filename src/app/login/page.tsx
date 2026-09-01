@@ -1,9 +1,11 @@
 "use client";
 
 import { useActionState } from "react";
-import { GraduationCap } from "lucide-react";
+import Link from "next/link";
+import { GraduationCap, ArrowLeft } from "lucide-react";
 import { loginAction, type LoginState } from "./actions";
 import { Button } from "@/components/ui/button";
+import { FadeIn } from "@/components/motion/fade-in";
 import {
   Card,
   CardContent,
@@ -22,8 +24,15 @@ export default function LoginPage() {
   );
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] p-4">
-      <Card className="w-full max-w-sm shadow-md">
+    <div className="relative flex min-h-screen items-center justify-center bg-[#f8fafc] p-4">
+      <Link
+        href="/"
+        className="absolute left-4 top-4 flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+      >
+        <ArrowLeft className="h-4 w-4" /> Back to website
+      </Link>
+      <FadeIn>
+        <Card className="w-full max-w-sm shadow-md">
         <CardHeader className="items-center text-center">
           <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-[#1e3a5f] text-white">
             <GraduationCap className="h-8 w-8" />
@@ -65,6 +74,7 @@ export default function LoginPage() {
           </form>
         </CardContent>
       </Card>
+      </FadeIn>
     </div>
   );
 }

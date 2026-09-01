@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Search } from "lucide-react";
+import { FadeIn } from "@/components/motion/fade-in";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RoutineGrid, type RoutineMatrix } from "@/components/routine/routine-grid";
@@ -42,6 +43,7 @@ export function TeacherRoutineViewer({
   const meta = selected ? teacherMeta[selected] : undefined;
 
   return (
+    <FadeIn>
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-[#1e3a5f]">Teacher Routine</h1>
@@ -101,5 +103,6 @@ export function TeacherRoutineViewer({
         </Card>
       )}
     </div>
+    </FadeIn>
   );
 }

@@ -128,11 +128,21 @@ Seed file: `supabase/seed.sql` — default super admin + sample classes/sections
 - PDF export: `/api/routine.pdf?section=ID` using `@react-pdf/renderer` (nodejs runtime, dynamic import), A4 landscape weekly grid; "PDF" button added to public RoutineViewer
 - Build verified (routes: /admin/adjust, /api/routine.pdf)
 
-### Phase 8 — Polish
-- Animations, mobile/tablet optimization, skeleton loaders, empty states
+### Phase 8 — Polish ✅
+- `FadeIn` (framer-motion) entry animations on public pages (Home/routine/teacher/teachers) + login
+- Live "pulse" badge on the current-period card (animate-ping dot, "Live" label)
+- `ui/skeleton.tsx` + `loading.tsx` skeletons for the public group and admin area
+- Admin dashboard upgraded: routine-coverage progress card + quick-action cards with hover states
+- Login page: "Back to website" link + fade-in
+- Mobile-friendly throughout; routine grids scroll horizontally
+- Lint + full build pass
 
-### Phase 9 — Deploy Readiness
-- Env config for Vercel/Firebase App Hosting, production build check
+### Phase 9 — Deploy Readiness ✅
+- `vercel.json` pins the PDF route to `nodejs22.x` runtime (needs Node for `@react-pdf/renderer`)
+- `.gitignore` now keeps `.env.local.example` committed (un-ignored via `!.env.local.example`); all real secrets stay ignored
+- `engines.node >= 22` + `.nvmrc` (24.18.0); build script uses Turbopack (Next 15.5)
+- Middleware runs on edge by default; admin/PDF routes use server/node runtime — verified
+- Production build passes cleanly with all config in place
 
 ---
 

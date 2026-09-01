@@ -48,9 +48,20 @@ export function CurrentPeriodCard({
           {season === "summer" ? <Sun className="h-4 w-4 text-amber-500" /> : <Moon className="h-4 w-4 text-slate-400" />}
           <span>Summer Schedule</span>
         </div>
-        <span className="text-xs text-slate-400">
-          {dayIndex !== null ? `Day ${dayIndex + 1}` : "Weekend"}
-        </span>
+        <div className="flex items-center gap-2">
+          {!inactive && (
+            <span className="flex items-center gap-1.5 rounded-full bg-[#0d9488] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+              </span>
+              Live
+            </span>
+          )}
+          <span className="text-xs text-slate-400">
+            {dayIndex !== null ? `Day ${dayIndex + 1}` : "Weekend"}
+          </span>
+        </div>
       </div>
 
       <div className="mt-4">

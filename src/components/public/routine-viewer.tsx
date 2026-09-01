@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Download } from "lucide-react";
+import { FadeIn } from "@/components/motion/fade-in";
 import {
   Select,
   SelectContent,
@@ -39,6 +40,7 @@ export function RoutineViewer({
   const matrix = sectionId ? matrices[sectionId] : undefined;
 
   return (
+    <FadeIn>
     <div className="space-y-6">
       <Card className="bg-white/70">
         <CardContent className="flex flex-wrap items-end gap-4 pt-6">
@@ -109,5 +111,6 @@ export function RoutineViewer({
         </Card>
       )}
     </div>
+    </FadeIn>
   );
 }

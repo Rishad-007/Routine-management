@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
+import { FadeIn } from "@/components/motion/fade-in";
 import { Input } from "@/components/ui/input";
 import {
   Card,
@@ -48,6 +49,7 @@ export function TeachersDirectory({
   );
 
   return (
+    <FadeIn>
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-[#1e3a5f]">Teachers Directory</h1>
@@ -110,5 +112,6 @@ export function TeachersDirectory({
         <p className="py-10 text-center text-sm text-slate-400">No teachers found.</p>
       )}
     </div>
+    </FadeIn>
   );
 }

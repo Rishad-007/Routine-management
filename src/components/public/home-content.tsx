@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { CurrentPeriodCard } from "./current-period-card";
+import { FadeIn } from "@/components/motion/fade-in";
 import { useCurrentPeriod } from "@/hooks/use-current-period";
 import type { Season } from "@/lib/constants";
 import type {
@@ -79,6 +80,7 @@ export function HomeContent({
 
   return (
     <div className="space-y-8">
+      <FadeIn>
       <section className="text-center">
         <h1 className="text-3xl font-bold text-[#1e3a5f] md:text-4xl">
           Weekly Class Routine
@@ -88,8 +90,10 @@ export function HomeContent({
           shows what is running right now.
         </p>
       </section>
+      </FadeIn>
 
       {/* Live card + quick picker */}
+      <FadeIn stagger={0.08}>
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <CurrentPeriodCard season={season} currentCell={currentCell} />
@@ -130,8 +134,10 @@ export function HomeContent({
           </CardContent>
         </Card>
       </div>
+      </FadeIn>
 
       {/* Teachers grid */}
+      <FadeIn stagger={0.14}>
       <section>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-semibold text-[#1e3a5f]">Our Teachers</h2>
@@ -167,6 +173,7 @@ export function HomeContent({
           })}
         </div>
       </section>
+      </FadeIn>
     </div>
   );
 }
