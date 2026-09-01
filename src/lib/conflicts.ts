@@ -120,6 +120,71 @@ export function allTeacherLoads(
   return map;
 }
 
+export interface AssignmentSimulation {
+  level: "ok" | "yellow" | "red";
+  reasons: string[];
+  count: number;
+  stretch: number;
+}
+
+/**
+ * Simulate assigning a teacher to a day+period.
+ * Removes any existing assignment at that cell (identified by sectionId+day+period)
+ * and inserts the new one, then checks the adjusted thresholds.
+ *
+ * Thresholds (teacher-first adjust):
+ * - yellow: >= 4 periods that day, OR creates 3-consecutive, OR teacher is busy at day+period
+ * - red: >= 5 periods that day, OR creates 4-consecutive
+ */
+export function simulateTeacherAssignment(
+  routines: RoutineRow[],
+  teacherId: string,
+  day: number,
+  period: number,
+  excludeSectionId?: string
+): AssignmentSimulation {
+  const existingCell = routines.find(
+    (r) =>
+      r.day === day &&
+      r.period_number === period &&
+      (excludeSectionId ? r.section_id === excludeSectionId : true) &&
+      r.teacher_id !== teacherId
+  );
+
+  const simulated = routines.filter(
+    (r) => !(r.day === day && r.period_number === period && r.section_id === existingCell?.section_id)
+  );
+
+  const count = countDayPeriods(simulated, teacherId, day);
+  const stretch = longestConsecutiveStretch(simulated, teacherId, day);
+  const busy = isTeacherBusy(simulated, teacherId, day, period);
+
+  const reasons: string[] = [];
+
+  if (busy) {
+    reasons.push("Teacher already assigned elsewhere at this period");
+  }
+
+  if (count >= 5) {
+    reasons.push(`${count + 1} periods that day (exceeds safe limit)`);
+  } else if (count >= 4) {
+    reasons.push(`${count + 1} periods that day`);
+  }
+
+  if (stretch >= 4) {
+    reasons.push(`Would create ${stretch + 1} consecutive periods`);
+  } else if (stretch >= 3) {
+    reasons.push(`Would create ${stretch + 1} consecutive periods`);
+  }
+
+  const isRed = busy || count >= 5 || stretch >= 4;
+  const isYellow = !isRed && (count >= 4 || stretch >= 3);
+
+  const level: "ok" | "yellow" | "red" = isRed ? "red" : isYellow ? "yellow" : "ok";
+
+  return { level, reasons, count: count + 1, stretch: stretch + 1 };
+}
+
 export interface WeeklyLoad {
   teacherId: string;
   perDay: Record<number, number>;

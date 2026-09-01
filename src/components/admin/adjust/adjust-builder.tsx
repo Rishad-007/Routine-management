@@ -3,23 +3,51 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Save, Info, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import {
+  Save,
+  Search,
+  AlertTriangle,
+  RotateCcw,
+  Users,
+  BookOpen,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   DAY_LABEL_LIST,
   PERIOD_ORDER,
   TIFFIN_AFTER_PERIOD,
 } from "@/lib/constants";
 import { getSchoolDayIndex } from "@/lib/periods";
-import { saveDayAdjustments, type PeriodAdjustment } from "@/app/admin/adjust/actions";
+import {
+  countDayPeriods,
+  weeklyLoad,
+  simulateTeacherAssignment,
+  isTeacherBusy,
+} from "@/lib/conflicts";
+import {
+  saveAllAdjustments,
+  type PeriodAdjustment,
+} from "@/app/admin/adjust/actions";
 import type {
   ClassRow,
   SectionRow,
@@ -45,6 +73,17 @@ function toDateInput(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+interface DayCell {
+  period: number;
+  sectionId: string;
+  subjectName: string;
+  className: string;
+  sectionName: string;
+  baseTeacherId: string;
+  effectiveTeacherId: string;
+  isAdjusted: boolean;
+}
+
 export function AdjustBuilder({
   classes,
   sections,
@@ -54,264 +93,628 @@ export function AdjustBuilder({
   adjustments,
 }: Props) {
   const router = useRouter();
-  const [classId, setClassId] = useState("");
-  const [sectionId, setSectionId] = useState("");
-  const [date, setDate] = useState(() => toDateInput(new Date()));
-  const [overrides, setOverrides] = useState<
-    Record<number, string | null | undefined>
-  >({});
-  const [reasons, setReasons] = useState<Record<number, string>>({});
-  const [saving, setSaving] = useState(false);
 
-  const teacherNames = useMemo(
-    () => new Map(teachers.map((t) => [t.id, t.short_name])),
-    [teachers]
+  const [date, setDate] = useState(() => toDateInput(new Date()));
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(
+    null
   );
-  const subjectNames = useMemo(
+  const [overrides, setOverrides] = useState<
+    Record<number, { newTeacherId: string | null; sectionId: string; reason: string }>
+  >({});
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetPeriod, setSheetPeriod] = useState<number | null>(null);
+  const [teacherSearch, setTeacherSearch] = useState("");
+  const [sheetSearch, setSheetSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [pendingRed, setPendingRed] = useState<{
+    adjustment: PeriodAdjustment;
+    reasons: string[];
+  } | null>(null);
+
+  const dayIndex = useMemo(
+    () => getSchoolDayIndex(new Date(date + "T00:00:00")),
+    [date]
+  );
+  const isNoSchool = dayIndex === null;
+
+  const subjectMap = useMemo(
     () => new Map(subjects.map((s) => [s.id, s])),
     [subjects]
   );
-  const classSections = sections.filter((s) => s.class_id === classId);
 
-  const dayIndex = useMemo(() => getSchoolDayIndex(new Date(date + "T00:00:00")), [date]);
-  const isNoSchool = dayIndex === null;
+  const selectedTeacher = useMemo(
+    () => teachers.find((t) => t.id === selectedTeacherId) ?? null,
+    [teachers, selectedTeacherId]
+  );
 
-  // Effective teacher per period for the selected day.
-  const dayCells = useMemo(() => {
-    const cells: { period: number; subjectId: string | null; baseTeacherId: string | null }[] = [];
-    if (!sectionId || dayIndex === null) return cells;
+  const dayRoutines = useMemo(() => {
+    if (!selectedTeacherId || dayIndex === null) return [];
+    return routines.filter(
+      (r) => r.teacher_id === selectedTeacherId && r.day === dayIndex
+    );
+  }, [routines, selectedTeacherId, dayIndex]);
+
+  const dayCells: DayCell[] = useMemo(() => {
+    if (!selectedTeacherId || dayIndex === null) return [];
+    const cells: DayCell[] = [];
     for (const p of PERIOD_ORDER) {
-      const r = routines.find(
-        (x) => x.section_id === sectionId && x.day === dayIndex && x.period_number === p
+      const r = dayRoutines.find((x) => x.period_number === p);
+      if (!r) continue;
+      const subject = r.subject_id ? subjectMap.get(r.subject_id) : undefined;
+      const classRow = classes.find((c) => {
+        const s = sections.find((x) => x.id === r.section_id);
+        return s && c.id === s.class_id;
+      });
+      const sectionRow = sections.find((x) => x.id === r.section_id);
+
+      const existingAdj = adjustments.find(
+        (a) =>
+          a.adjust_date === date &&
+          a.section_id === r.section_id &&
+          a.period_number === p
       );
+
+      const override = overrides[p];
+
       cells.push({
         period: p,
-        subjectId: r?.subject_id ?? null,
-        baseTeacherId: r?.teacher_id ?? null,
+        sectionId: r.section_id,
+        subjectName: subject?.name ?? "—",
+        className: classRow?.name ?? "—",
+        sectionName: sectionRow?.name ?? "—",
+        baseTeacherId: r.teacher_id ?? "",
+        effectiveTeacherId: override
+          ? override.newTeacherId ?? ""
+          : existingAdj?.new_teacher_id ?? "",
+        isAdjusted: !!existingAdj || !!override,
       });
     }
     return cells;
-  }, [sectionId, dayIndex, routines]);
+  }, [
+    dayRoutines,
+    selectedTeacherId,
+    dayIndex,
+    subjectMap,
+    classes,
+    sections,
+    adjustments,
+    date,
+    overrides,
+  ]);
 
-  // Existing adjustments for this date+section.
-  const existingAdjustments = useMemo(
-    () =>
-      adjustments.filter((a) => a.section_id === sectionId && a.adjust_date === date),
-    [adjustments, sectionId, date]
-  );
+  const filteredTeachers = useMemo(() => {
+    if (!teacherSearch.trim()) return teachers;
+    const q = teacherSearch.toLowerCase();
+    return teachers.filter(
+      (t) =>
+        t.short_name.toLowerCase().includes(q) ||
+        t.teacher_code.toLowerCase().includes(q) ||
+        t.id.toLowerCase().includes(q)
+    );
+  }, [teachers, teacherSearch]);
 
-  const resetOverrides = () => {
-    const map: Record<number, string | null> = {};
-    for (const a of existingAdjustments) map[a.period_number] = a.new_teacher_id;
-    setOverrides(map);
+  const teacherDayCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    if (dayIndex === null) return map;
+    for (const t of teachers) {
+      map.set(t.id, countDayPeriods(routines, t.id, dayIndex));
+    }
+    return map;
+  }, [teachers, routines, dayIndex]);
+
+  const freeTeachersForSheet = useMemo(() => {
+    if (sheetPeriod === null || dayIndex === null) return [];
+    return teachers
+      .filter(
+        (t) =>
+          !isTeacherBusy(routines, t.id, dayIndex, sheetPeriod) ||
+          t.id === selectedTeacherId
+      )
+      .map((t) => {
+        const dayCount = countDayPeriods(routines, t.id, dayIndex);
+        const week = weeklyLoad(routines, t.id);
+        return { ...t, dayCount, weekTotal: week.total };
+      })
+      .sort((a, b) => a.short_name.localeCompare(b.short_name));
+  }, [teachers, routines, dayIndex, sheetPeriod, selectedTeacherId]);
+
+  const filteredFreeTeachers = useMemo(() => {
+    if (!sheetSearch.trim()) return freeTeachersForSheet;
+    const q = sheetSearch.toLowerCase();
+    return freeTeachersForSheet.filter(
+      (t) =>
+        t.short_name.toLowerCase().includes(q) ||
+        t.teacher_code.toLowerCase().includes(q)
+    );
+  }, [freeTeachersForSheet, sheetSearch]);
+
+  const handleCellClick = (period: number) => {
+    setSheetPeriod(period);
+    setSheetSearch("");
+    setSheetOpen(true);
   };
 
-  const handleSave = async () => {
-    if (!sectionId || dayIndex === null) return;
+  const handleAssign = (period: number, newTeacherId: string) => {
+    const cell = dayCells.find((c) => c.period === period);
+    if (!cell) return;
+
+    if (newTeacherId === cell.baseTeacherId) {
+      setOverrides((prev) => {
+        const next = { ...prev };
+        delete next[period];
+        return next;
+      });
+      setSheetOpen(false);
+      return;
+    }
+
+    const sim = simulateTeacherAssignment(
+      routines,
+      newTeacherId,
+      dayIndex!,
+      period,
+      cell.sectionId
+    );
+
+    if (sim.level === "red") {
+      setPendingRed({
+        adjustment: {
+          period,
+          sectionId: cell.sectionId,
+          originalTeacherId: cell.baseTeacherId,
+          newTeacherId,
+          reason: "",
+          level: "red",
+          reasons: sim.reasons,
+        },
+        reasons: sim.reasons,
+      });
+      return;
+    }
+
+    if (sim.level === "yellow") {
+      toast.warning(`Warning: ${sim.reasons.join("; ")}`, {
+        duration: 6000,
+      });
+    }
+
+    setOverrides((prev) => ({
+      ...prev,
+      [period]: { newTeacherId, sectionId: cell.sectionId, reason: "" },
+    }));
+    setSheetOpen(false);
+  };
+
+  const confirmRed = () => {
+    if (!pendingRed) return;
+    const { adjustment } = pendingRed;
+    setOverrides((prev) => ({
+      ...prev,
+      [adjustment.period]: {
+        newTeacherId: adjustment.newTeacherId,
+        sectionId: adjustment.sectionId,
+        reason: "",
+      },
+    }));
+    setPendingRed(null);
+    setSheetOpen(false);
+  };
+
+  const resetCell = (period: number) => {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      delete next[period];
+      return next;
+    });
+  };
+
+  const resetAll = () => {
+    setOverrides({});
+  };
+
+  const handleSave = async (force = false) => {
+    if (!selectedTeacherId || dayIndex === null) return;
     setSaving(true);
-    const changes: PeriodAdjustment[] = Object.entries(overrides)
-      .map(([period, newId]) => {
-        const cell = dayCells.find((c) => c.period === Number(period));
-        return {
-          period: Number(period),
-          originalTeacherId: cell?.baseTeacherId ?? null,
-          newTeacherId: newId ?? null,
-          reason: reasons[Number(period)]?.trim() || null,
-        };
+
+    const changes: PeriodAdjustment[] = Object.entries(overrides).map(
+      ([period, o]) => ({
+        period: Number(period),
+        sectionId: o.sectionId,
+        originalTeacherId:
+          dayCells.find((c) => c.period === Number(period))
+            ?.baseTeacherId ?? null,
+        newTeacherId: o.newTeacherId,
+        reason: o.reason || null,
+        level: "ok" as const,
+        reasons: [],
       })
-      .filter((c) => c.newTeacherId);
-    const res = await saveDayAdjustments(date, sectionId, changes);
+    );
+
+    const res = await saveAllAdjustments(date, changes, force);
     setSaving(false);
+
     if (res.error) {
       toast.error(res.error);
       return;
     }
+
+    if (res.warnings && res.warnings.length > 0 && !force) {
+      const hasRed = res.warnings.some((w) => w.level === "red");
+      if (hasRed) {
+        setPendingRed({
+          adjustment: changes[0],
+          reasons: res.warnings.flatMap((w) => w.reasons),
+        });
+        return;
+      }
+      toast.warning(
+        `${res.warnings.length} warning(s). Review before saving.`,
+        {
+          duration: 8000,
+        }
+      );
+      return;
+    }
+
     toast.success(`Saved ${res.savedCount ?? 0} adjustment(s) for ${date}`);
+    setOverrides({});
     router.refresh();
   };
 
+  const hasChanges = Object.keys(overrides).length > 0;
+
   return (
     <div className="space-y-5">
-      {/* Selectors */}
+      {/* Date selector */}
       <div className="flex flex-wrap items-end gap-4 rounded-xl border bg-white p-4 shadow-sm">
         <div className="space-y-1">
-          <p className="text-xs font-medium text-slate-500">Class</p>
-          <Select value={classId} onValueChange={(v) => setClassId(v ?? "")} items={classes.map(c => ({ value: c.id, label: c.name }))}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Select class" />
-            </SelectTrigger>
-            <SelectContent>
-              {classes.map((c) => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <p className="text-xs font-medium text-slate-500">
+            Adjustment date
+          </p>
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-44"
+          />
         </div>
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-slate-500">Section</p>
-          <Select
-            value={sectionId}
-            onValueChange={(v) => setSectionId(v ?? "")}
-            disabled={!classId}
-            items={classSections.map(s => ({ value: s.id, label: `Section ${s.name}` }))}
-          >
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder={classId ? "Select section" : "Class first"} />
-            </SelectTrigger>
-            <SelectContent>
-              {classSections.map((s) => (
-                <SelectItem key={s.id} value={s.id} label={`Section ${s.name}`}>Section {s.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-slate-500">Adjustment date</p>
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-44" />
-        </div>
-      </div>
-
-      {!sectionId || isNoSchool ? (
-        <div className="rounded-xl border border-dashed bg-white p-14 text-center text-sm text-slate-400">
-          {!sectionId
-            ? "Select a class and section."
-            : "This is a weekend (Friday/Saturday) — no routine to adjust. Pick a Sunday–Thursday date."}
-        </div>
-      ) : (
-        <>
-          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            <Info className="mt-0.5 h-4 w-4 shrink-0" />
+        {dayIndex !== null && (
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <BookOpen className="h-4 w-4" />
             <span>
-              Adjusting <strong>{DAY_LABEL_LIST[dayIndex!]}</strong> routine for{" "}
-              <strong>{date}</strong> only. Base routine stays unchanged for other days.
+              <strong>{DAY_LABEL_LIST[dayIndex]}</strong> routine
             </span>
           </div>
+        )}
+      </div>
 
-          <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
-            <table className="w-full min-w-[640px] border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="w-20 border border-slate-200 bg-[#1e3a5f] px-2 py-2 text-left text-xs font-semibold uppercase text-white">
-                    Period
-                  </th>
-                  <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
-                    Subject (base)
-                  </th>
-                  <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
-                    Base teacher
-                  </th>
-                  <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
-                    Substitute teacher
-                  </th>
-                  <th className="w-56 border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
-                    Note (optional)
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {dayCells.map((cell) => {
-                  const effective =
-                    overrides[cell.period] ?? cell.baseTeacherId;
-                  const subj = cell.subjectId ? subjectNames.get(cell.subjectId) : undefined;
-                  const overriding =
-                    overrides[cell.period] !== undefined &&
-                    overrides[cell.period] !== cell.baseTeacherId;
-                  return (
-                    <tr key={cell.period} className={overriding ? "bg-amber-50" : ""}>
-                      <td className="border border-slate-200 px-2 py-2 text-center text-xs font-semibold text-slate-600">
-                        P{cell.period}
-                        {cell.period === TIFFIN_AFTER_PERIOD && (
-                          <span className="block text-[10px] font-normal text-amber-500">Tiffin↓</span>
-                        )}
-                      </td>
-                      <td className="border border-slate-200 px-3 py-2 text-slate-700">
-                        {subj?.name ?? "—"}
-                      </td>
-                      <td className="border border-slate-200 px-3 py-2 text-slate-700">
-                        {cell.baseTeacherId
-                          ? teacherNames.get(cell.baseTeacherId) ?? "—"
-                          : "—"}
-                      </td>
-                      <td className="border border-slate-200 px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <Select
-                            value={effective ?? "none"}
-                            onValueChange={(v) => {
-                              const id = v === "none" ? null : (v ?? null);
-                              setOverrides((prev) => ({
-                                ...prev,
-                                [cell.period]:
-                                  id === cell.baseTeacherId
-                                    ? undefined
-                                    : id ?? null,
-                              }));
-                            }}
-                            items={[{ value: "none", label: "— No change —" }, ...teachers.map(t => ({ value: t.id, label: `${t.short_name} (${t.teacher_code})` }))]}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="No change" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">— No change —</SelectItem>
-                              {teachers.map((t) => (
-                                <SelectItem
-                                  key={t.id}
-                                  value={t.id}
-                                  label={`${t.short_name} (${t.teacher_code})`}
-                                >
-                                  {t.short_name} ({t.teacher_code})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {cell.baseTeacherId &&
-                            overrides[cell.period] &&
-                            overrides[cell.period] !== cell.baseTeacherId && (
-                              <button
-                                onClick={() =>
-                                  setOverrides((prev) => ({
-                                    ...prev,
-                                    [cell.period]: undefined,
-                                  }))
-                                }
-                                className="text-slate-400 hover:text-slate-600"
-                                title="Reset to original"
-                              >
-                                <RotateCcw className="h-4 w-4" />
-                              </button>
+      {isNoSchool ? (
+        <div className="rounded-xl border border-dashed bg-white p-14 text-center text-sm text-slate-400">
+          This is a weekend (Friday/Saturday) — no routine to adjust. Pick a
+          Sunday–Thursday date.
+        </div>
+      ) : (
+        <div className="flex gap-4">
+          {/* Teacher rail */}
+          <div className="flex w-64 shrink-0 flex-col rounded-xl border bg-white shadow-sm">
+            <div className="border-b p-3">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  placeholder="Search teachers..."
+                  value={teacherSearch}
+                  onChange={(e) => setTeacherSearch(e.target.value)}
+                  className="pl-8"
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {filteredTeachers.map((t) => {
+                const isSelected = t.id === selectedTeacherId;
+                const dayCount = teacherDayCounts.get(t.id) ?? 0;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setSelectedTeacherId(t.id)}
+                    className={cn(
+                      "w-full px-3 py-2.5 text-left text-sm transition-colors border-b last:border-b-0",
+                      isSelected
+                        ? "bg-[#0d9488]/10 text-[#0b7a70]"
+                        : "hover:bg-slate-50"
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-slate-800">
+                        {t.short_name}
+                      </span>
+                      <span className="text-xs text-slate-400">
+                        {dayCount}P today
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-slate-500">
+                      {t.teacher_code}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Teacher day grid */}
+          <div className="flex-1">
+            {!selectedTeacher ? (
+              <div className="flex h-full min-h-[300px] items-center justify-center rounded-xl border border-dashed bg-white text-sm text-slate-400">
+                <Users className="mr-2 h-4 w-4" />
+                Select a teacher to view their routine
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-[#1e3a5f]">
+                      {selectedTeacher.short_name}
+                    </h3>
+                    <p className="text-sm text-slate-500">
+                      {selectedTeacher.teacher_code} — {DAY_LABEL_LIST[dayIndex!]}{" "}
+                      routine for {date}
+                    </p>
+                  </div>
+                  {hasChanges && (
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={resetAll}>
+                        <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                        Reset all
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => handleSave(false)}
+                        disabled={saving}
+                        className="bg-[#0d9488] text-white hover:bg-[#0b7a70]"
+                      >
+                        <Save className="mr-1 h-3.5 w-3.5" />
+                        {saving ? "Saving…" : "Save changes"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr>
+                        <th className="w-16 border border-slate-200 bg-[#1e3a5f] px-2 py-2 text-center text-xs font-semibold uppercase text-white">
+                          P
+                        </th>
+                        <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
+                          Class
+                        </th>
+                        <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
+                          Subject
+                        </th>
+                        <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
+                          Status
+                        </th>
+                        <th className="w-20 border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-center text-xs font-semibold uppercase text-slate-600">
+                          Action
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dayCells.map((cell) => {
+                        const override = overrides[cell.period];
+                        const hasOverride = !!override;
+                        const effectiveName = override
+                          ? teachers.find(
+                              (t) => t.id === override.newTeacherId
+                            )?.short_name
+                          : cell.effectiveTeacherId
+                            ? teachers.find(
+                                (t) => t.id === cell.effectiveTeacherId
+                              )?.short_name
+                            : null;
+
+                        return (
+                          <tr
+                            key={cell.period}
+                            className={cn(
+                              "transition-colors",
+                              hasOverride && "bg-amber-50"
                             )}
-                        </div>
-                      </td>
-                      <td className="border border-slate-200 px-3 py-2">
-                        <Input
-                          placeholder="e.g. sick leave"
-                          value={reasons[cell.period] ?? ""}
-                          onChange={(e) =>
-                            setReasons((prev) => ({
-                              ...prev,
-                              [cell.period]: e.target.value,
-                            }))
-                          }
-                        />
-                      </td>
-                    </tr>
+                          >
+                            <td className="border border-slate-200 px-2 py-2 text-center text-xs font-bold text-slate-600">
+                              P{cell.period}
+                              {cell.period === TIFFIN_AFTER_PERIOD && (
+                                <span className="block text-[10px] font-normal text-amber-500">
+                                  Tiffin↓
+                                </span>
+                              )}
+                            </td>
+                            <td className="border border-slate-200 px-3 py-2">
+                              <span className="font-medium text-[#1e3a5f]">
+                                {cell.className}-{cell.sectionName}
+                              </span>
+                            </td>
+                            <td className="border border-slate-200 px-3 py-2 text-slate-700">
+                              {cell.subjectName}
+                            </td>
+                            <td className="border border-slate-200 px-3 py-2">
+                              {hasOverride || cell.isAdjusted ? (
+                                <div className="flex items-center gap-1.5">
+                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                                  <span className="text-sm font-medium text-amber-700">
+                                    {effectiveName ?? "—"}
+                                  </span>
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-[10px]"
+                                  >
+                                    Adjusted
+                                  </Badge>
+                                </div>
+                              ) : (
+                                <span className="text-sm text-slate-500">
+                                  {selectedTeacher.short_name}
+                                </span>
+                              )}
+                            </td>
+                            <td className="border border-slate-200 px-2 py-2 text-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleCellClick(cell.period)}
+                                className="h-7 text-xs"
+                              >
+                                Change
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Teacher assignment sheet */}
+      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-sm">
+          <SheetHeader>
+            <SheetTitle>
+              Assign teacher — Period {sheetPeriod}
+            </SheetTitle>
+            <SheetDescription>
+              Select a free teacher for this period. Teachers already assigned
+              elsewhere at this time are excluded.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="px-4">
+            <div className="relative mb-3">
+              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                placeholder="Search by name or code..."
+                value={sheetSearch}
+                onChange={(e) => setSheetSearch(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+
+            <div className="max-h-[calc(100vh-18rem)] space-y-2 overflow-y-auto pr-1">
+              {filteredFreeTeachers.length === 0 ? (
+                <p className="py-8 text-center text-sm text-slate-400">
+                  No free teachers available
+                </p>
+              ) : (
+                filteredFreeTeachers.map((t) => {
+                  const sim = simulateTeacherAssignment(
+                    routines,
+                    t.id,
+                    dayIndex!,
+                    sheetPeriod!,
+                    dayCells.find((c) => c.period === sheetPeriod)
+                      ?.sectionId
                   );
-                })}
-              </tbody>
-            </table>
+                  const levelColor =
+                    sim.level === "red"
+                      ? "border-red-300 bg-red-50"
+                      : sim.level === "yellow"
+                        ? "border-amber-300 bg-amber-50"
+                        : "border-slate-200 bg-white";
+
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() =>
+                        handleAssign(sheetPeriod!, t.id)
+                      }
+                      className={cn(
+                        "w-full rounded-lg border p-3 text-left transition-colors hover:border-[#0d9488] hover:bg-[#0d9488]/5",
+                        levelColor
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-slate-800">
+                          {t.short_name}
+                        </span>
+                        <div className="flex gap-2 text-xs text-slate-500">
+                          <span>{t.dayCount}P day</span>
+                          <span>·</span>
+                          <span>{t.weekTotal}P wk</span>
+                        </div>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {t.teacher_code}
+                        {sim.level === "yellow" && (
+                          <span className="ml-2 text-amber-600">
+                            ⚠ {sim.reasons.join("; ")}
+                          </span>
+                        )}
+                        {sim.level === "red" && (
+                          <span className="ml-2 text-red-600">
+                            ✖ {sim.reasons.join("; ")}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Button onClick={handleSave} disabled={saving}>
-              <Save className="mr-1.5 h-4 w-4" />
-              {saving ? "Saving…" : "Save adjustments for " + date}
-            </Button>
-            <Button variant="outline" onClick={resetOverrides}>
-              Reset
-            </Button>
-          </div>
-        </>
-      )}
+          {sheetPeriod !== null &&
+            overrides[sheetPeriod]?.newTeacherId && (
+              <div className="px-4 pt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => resetCell(sheetPeriod!)}
+                  className="w-full"
+                >
+                  <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                  Reset to original
+                </Button>
+              </div>
+            )}
+        </SheetContent>
+      </Sheet>
+
+      {/* Red warning confirmation dialog */}
+      <AlertDialog
+        open={!!pendingRed}
+        onOpenChange={(open) => {
+          if (!open) setPendingRed(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-700">
+              <AlertTriangle className="h-5 w-5" />
+              Dangerous Assignment
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRed?.reasons.map((r, i) => (
+                <p key={i} className="mb-1">
+                  • {r}
+                </p>
+              ))}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmRed}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              Save anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

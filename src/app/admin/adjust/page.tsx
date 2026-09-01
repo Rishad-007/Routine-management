@@ -26,8 +26,8 @@ export default async function AdminAdjustPage() {
       <div>
         <h1 className="text-2xl font-bold text-[#1e3a5f]">Adjust Routine</h1>
         <p className="text-sm text-slate-500">
-          Make temporary, date-scoped teacher substitutions. These apply to a
-          single day only and never change the base weekly routine.
+          Make temporary, date-scoped teacher substitutions. Select a teacher to
+          view their day grid, then click a period to reassign.
         </p>
       </div>
       <AdjustBuilder
