@@ -79,7 +79,8 @@ Seed file: `supabase/seed.sql` — default super admin + sample classes/sections
 - Supabase client factories (browser `client.ts` / SSR `server.ts` / service-role `admin.ts`)
 - Data-access layer `lib/data.ts`, types, constants, query provider
 - User provides Supabase URL + keys (env vars filled in `.env.local`)
-- ⚠️ schema.sql + seed.sql still need to be RUN in Supabase SQL Editor
+- ⚠️ schema.sql still needs to be RUN in Supabase SQL Editor
+- **`supabase/demo-data.sql`** (added later): 🔥 deletes all data and inserts a large demo set (5 classes, 21 teachers, 24 rooms, 10 subjects, 15 sections, 525 routine cells) with deliberately planted conflict scenarios (4-consecutive red, 3-consecutive yellow, 6/day red, 5/day yellow, cross-section double-book red) + 2 date-scoped adjustments. Validated locally against Postgres 15; idempotent/re-runnable.
 
 ### Phase 2 — Auth ✅
 - `lib/auth.ts` — signed HTTP-only `school_session` cookie (HMAC + expiry), bcrypt verify
@@ -126,8 +127,6 @@ Seed file: `supabase/seed.sql` — default super admin + sample classes/sections
 - `getAdjustments()` added to `data.ts`
 - PDF export: `/api/routine.pdf?section=ID` using `@react-pdf/renderer` (nodejs runtime, dynamic import), A4 landscape weekly grid; "PDF" button added to public RoutineViewer
 - Build verified (routes: /admin/adjust, /api/routine.pdf)
-- Adjust via Teacher OR Class+Section
-- PDF report via route handler (`@react-pdf/renderer`)
 
 ### Phase 8 — Polish
 - Animations, mobile/tablet optimization, skeleton loaders, empty states
