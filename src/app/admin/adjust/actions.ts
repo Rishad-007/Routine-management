@@ -4,13 +4,19 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/auth";
 import { simulateTeacherAssignment } from "@/lib/conflicts";
+import { getSchoolDayIndex } from "@/lib/periods";
 import type { RoutineRow } from "@/lib/types";
 
 export interface PeriodAdjustment {
   period: number;
   sectionId: string;
+  isTag: boolean;
   originalTeacherId: string | null;
   newTeacherId: string | null;
+  originalSubjectId: string | null;
+  newSubjectId: string | null;
+  originalRoomId: string | null;
+  newRoomId: string | null;
   reason: string | null;
   level: "ok" | "yellow" | "red";
   reasons: string[];
@@ -42,13 +48,18 @@ export async function saveDayAdjustments(
   if (delErr) return { error: delErr.message };
 
   const insertRows = changes
-    .filter((c) => c.newTeacherId)
+    .filter((c) => c.newTeacherId || c.newSubjectId || c.newRoomId)
     .map((c) => ({
       adjust_date: adjustDate,
       section_id: sectionId,
       period_number: c.period,
+      is_tag: c.isTag,
       original_teacher_id: c.originalTeacherId,
       new_teacher_id: c.newTeacherId,
+      original_subject_id: c.originalSubjectId,
+      new_subject_id: c.newSubjectId,
+      original_room_id: c.originalRoomId,
+      new_room_id: c.newRoomId,
       reason: c.reason ?? null,
       created_by: null,
     }));
@@ -75,10 +86,13 @@ export async function saveAllAdjustments(
   const { admin } = await authed();
   if (!adjustDate) return { error: "Date is required." };
 
+  const dayIndex = getSchoolDayIndex(new Date(adjustDate + "T00:00:00"));
+  if (dayIndex === null) return { error: "Cannot adjust on a weekend." };
+
   // Fetch all routines for conflict validation.
   const { data: allRoutines, error: rErr } = await admin
     .from("routines")
-    .select("id, section_id, day, period_number, teacher_id, subject_id, room_id, is_adjusted, original_teacher_id");
+    .select("id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag, is_adjusted, original_teacher_id");
   if (rErr) return { error: rErr.message };
 
   const routines = (allRoutines ?? []) as RoutineRow[];
@@ -91,7 +105,7 @@ export async function saveAllAdjustments(
     const sim = simulateTeacherAssignment(
       routines,
       c.newTeacherId,
-      0, // day will be computed from adjustDate
+      dayIndex,
       c.period,
       c.sectionId
     );
@@ -123,13 +137,18 @@ export async function saveAllAdjustments(
     if (delErr) return { error: delErr.message };
 
     const insertRows = sectionChanges
-      .filter((c) => c.newTeacherId)
+      .filter((c) => c.newTeacherId || c.newSubjectId || c.newRoomId)
       .map((c) => ({
         adjust_date: adjustDate,
         section_id: sectionId,
         period_number: c.period,
+        is_tag: c.isTag,
         original_teacher_id: c.originalTeacherId,
         new_teacher_id: c.newTeacherId,
+        original_subject_id: c.originalSubjectId,
+        new_subject_id: c.newSubjectId,
+        original_room_id: c.originalRoomId,
+        new_room_id: c.newRoomId,
         reason: c.reason ?? null,
         created_by: null,
       }));

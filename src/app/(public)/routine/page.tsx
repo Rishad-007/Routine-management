@@ -6,8 +6,9 @@ import {
   getSubjects,
   getRooms,
   getSetting,
+  getAdjustments,
 } from "@/lib/data";
-import { buildSectionMatrix } from "@/lib/routine-view";
+import { buildSectionMatrix, buildTodayOverrides } from "@/lib/routine-view";
 import type { Season } from "@/lib/constants";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
 import { RoutineViewer } from "@/components/public/routine-viewer";
@@ -20,7 +21,7 @@ export default async function RoutinePage({
   searchParams: Promise<{ section?: string }>;
 }) {
   const params = await searchParams;
-  const [classes, sections, routines, teachers, subjects, rooms, season] =
+  const [classes, sections, routines, teachers, subjects, rooms, season, adjustments] =
     await Promise.all([
       getClasses(),
       getSections(),
@@ -29,11 +30,22 @@ export default async function RoutinePage({
       getSubjects(),
       getRooms(),
       getSetting("season"),
+      getAdjustments(),
     ]);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const todayPrimaryOverrides = buildTodayOverrides(adjustments, today, false);
+  const todayTagOverrides = buildTodayOverrides(adjustments, today, true);
 
   const matrices: Record<string, RoutineMatrix> = {};
   for (const s of sections) {
-    matrices[s.id] = buildSectionMatrix(routines, s.id, { teachers, subjects, rooms });
+    matrices[s.id] = buildSectionMatrix(
+      routines,
+      s.id,
+      { teachers, subjects, rooms },
+      todayPrimaryOverrides,
+      todayTagOverrides
+    );
   }
 
   return (

@@ -22,6 +22,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import {
   Save,
@@ -53,6 +60,7 @@ import type {
   SectionRow,
   TeacherRow,
   SubjectRow,
+  RoomRow,
   RoutineRow,
   AdjustmentRow,
 } from "@/lib/types";
@@ -62,6 +70,7 @@ interface Props {
   sections: SectionRow[];
   teachers: TeacherRow[];
   subjects: SubjectRow[];
+  rooms: RoomRow[];
   routines: RoutineRow[];
   adjustments: AdjustmentRow[];
 }
@@ -82,6 +91,19 @@ interface DayCell {
   baseTeacherId: string;
   effectiveTeacherId: string;
   isAdjusted: boolean;
+  isTag: boolean;
+  tagSubjectId: string | null;
+  tagTeacherId: string | null;
+  tagRoomId: string | null;
+  tagSubjectName: string;
+  tagEffectiveTeacherId: string;
+  isTagAdjusted: boolean;
+}
+
+interface TagOverride {
+  newTeacherId: string | null;
+  newSubjectId: string | null;
+  newRoomId: string | null;
 }
 
 export function AdjustBuilder({
@@ -89,6 +111,7 @@ export function AdjustBuilder({
   sections,
   teachers,
   subjects,
+  rooms,
   routines,
   adjustments,
 }: Props) {
@@ -101,8 +124,12 @@ export function AdjustBuilder({
   const [overrides, setOverrides] = useState<
     Record<number, { newTeacherId: string | null; sectionId: string; reason: string }>
   >({});
+  const [tagOverrides, setTagOverrides] = useState<
+    Record<number, TagOverride>
+  >({});
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetPeriod, setSheetPeriod] = useState<number | null>(null);
+  const [sheetTab, setSheetTab] = useState<"primary" | "tag">("primary");
   const [teacherSearch, setTeacherSearch] = useState("");
   const [sheetSearch, setSheetSearch] = useState("");
   const [saving, setSaving] = useState(false);
@@ -138,35 +165,77 @@ export function AdjustBuilder({
     if (!selectedTeacherId || dayIndex === null) return [];
     const cells: DayCell[] = [];
     for (const p of PERIOD_ORDER) {
-      const r = dayRoutines.find((x) => x.period_number === p);
-      if (!r) continue;
-      const subject = r.subject_id ? subjectMap.get(r.subject_id) : undefined;
+      const primary = dayRoutines.find(
+        (x) => x.period_number === p && !x.is_tag
+      );
+      if (!primary) continue;
+
+      const tag = dayRoutines.find(
+        (x) => x.period_number === p && x.is_tag
+      );
+      const subject = primary.subject_id
+        ? subjectMap.get(primary.subject_id)
+        : undefined;
       const classRow = classes.find((c) => {
-        const s = sections.find((x) => x.id === r.section_id);
+        const s = sections.find((x) => x.id === primary.section_id);
         return s && c.id === s.class_id;
       });
-      const sectionRow = sections.find((x) => x.id === r.section_id);
-
-      const existingAdj = adjustments.find(
-        (a) =>
-          a.adjust_date === date &&
-          a.section_id === r.section_id &&
-          a.period_number === p
+      const sectionRow = sections.find(
+        (x) => x.id === primary.section_id
       );
 
+      const existingPrimaryAdj = adjustments.find(
+        (a) =>
+          a.adjust_date === date &&
+          a.section_id === primary.section_id &&
+          a.period_number === p &&
+          !a.is_tag
+      );
+
+      const existingTagAdj = tag
+        ? adjustments.find(
+            (a) =>
+              a.adjust_date === date &&
+              a.section_id === tag.section_id &&
+              a.period_number === p &&
+              a.is_tag
+          )
+        : null;
+
       const override = overrides[p];
+      const tagOv = tagOverrides[p];
+
+      const effectiveTeacherId = override
+        ? override.newTeacherId ?? ""
+        : existingPrimaryAdj?.new_teacher_id ?? "";
+
+      const tagEffectiveTeacherId = tagOv
+        ? tagOv.newTeacherId ?? ""
+        : existingTagAdj?.new_teacher_id ?? "";
+      const tagEffectiveSubjectName = tagOv?.newSubjectId
+        ? subjectMap.get(tagOv.newSubjectId)?.name
+        : existingTagAdj?.new_subject_id
+          ? subjectMap.get(existingTagAdj.new_subject_id)?.name
+          : tag?.subject_id
+            ? subjectMap.get(tag.subject_id)?.name
+            : undefined;
 
       cells.push({
         period: p,
-        sectionId: r.section_id,
+        sectionId: primary.section_id,
         subjectName: subject?.name ?? "—",
         className: classRow?.name ?? "—",
         sectionName: sectionRow?.name ?? "—",
-        baseTeacherId: r.teacher_id ?? "",
-        effectiveTeacherId: override
-          ? override.newTeacherId ?? ""
-          : existingAdj?.new_teacher_id ?? "",
-        isAdjusted: !!existingAdj || !!override,
+        baseTeacherId: primary.teacher_id ?? "",
+        effectiveTeacherId,
+        isAdjusted: !!existingPrimaryAdj || !!override,
+        isTag: !!tag,
+        tagSubjectId: tag?.subject_id ?? null,
+        tagTeacherId: tag?.teacher_id ?? null,
+        tagRoomId: tag?.room_id ?? null,
+        tagSubjectName: tagEffectiveSubjectName ?? "—",
+        tagEffectiveTeacherId: tagEffectiveTeacherId || (tag?.teacher_id ?? ""),
+        isTagAdjusted: !!existingTagAdj || !!tagOv,
       });
     }
     return cells;
@@ -180,6 +249,8 @@ export function AdjustBuilder({
     adjustments,
     date,
     overrides,
+    tagOverrides,
+    teachers,
   ]);
 
   const filteredTeachers = useMemo(() => {
@@ -228,13 +299,14 @@ export function AdjustBuilder({
     );
   }, [freeTeachersForSheet, sheetSearch]);
 
-  const handleCellClick = (period: number) => {
+  const handleCellClick = (period: number, tab: "primary" | "tag" = "primary") => {
     setSheetPeriod(period);
+    setSheetTab(tab);
     setSheetSearch("");
     setSheetOpen(true);
   };
 
-  const handleAssign = (period: number, newTeacherId: string) => {
+  const handleAssignPrimary = (period: number, newTeacherId: string) => {
     const cell = dayCells.find((c) => c.period === period);
     if (!cell) return;
 
@@ -261,8 +333,13 @@ export function AdjustBuilder({
         adjustment: {
           period,
           sectionId: cell.sectionId,
+          isTag: false,
           originalTeacherId: cell.baseTeacherId,
           newTeacherId,
+          originalSubjectId: null,
+          newSubjectId: null,
+          originalRoomId: null,
+          newRoomId: null,
           reason: "",
           level: "red",
           reasons: sim.reasons,
@@ -285,50 +362,109 @@ export function AdjustBuilder({
     setSheetOpen(false);
   };
 
+  const handleAssignTag = (period: number, newTeacherId: string) => {
+    const cell = dayCells.find((c) => c.period === period);
+    if (!cell || !cell.isTag) return;
+
+    setTagOverrides((prev) => ({
+      ...prev,
+      [period]: {
+        ...prev[period],
+        newTeacherId,
+      },
+    }));
+    setSheetOpen(false);
+  };
+
   const confirmRed = () => {
     if (!pendingRed) return;
     const { adjustment } = pendingRed;
-    setOverrides((prev) => ({
-      ...prev,
-      [adjustment.period]: {
-        newTeacherId: adjustment.newTeacherId,
-        sectionId: adjustment.sectionId,
-        reason: "",
-      },
-    }));
+    if (adjustment.isTag) {
+      setTagOverrides((prev) => ({
+        ...prev,
+        [adjustment.period]: {
+          ...prev[adjustment.period],
+          newTeacherId: adjustment.newTeacherId,
+        },
+      }));
+    } else {
+      setOverrides((prev) => ({
+        ...prev,
+        [adjustment.period]: {
+          newTeacherId: adjustment.newTeacherId,
+          sectionId: adjustment.sectionId,
+          reason: "",
+        },
+      }));
+    }
     setPendingRed(null);
     setSheetOpen(false);
   };
 
   const resetCell = (period: number) => {
-    setOverrides((prev) => {
-      const next = { ...prev };
-      delete next[period];
-      return next;
-    });
+    if (sheetTab === "tag") {
+      setTagOverrides((prev) => {
+        const next = { ...prev };
+        delete next[period];
+        return next;
+      });
+    } else {
+      setOverrides((prev) => {
+        const next = { ...prev };
+        delete next[period];
+        return next;
+      });
+    }
   };
 
   const resetAll = () => {
     setOverrides({});
+    setTagOverrides({});
   };
 
   const handleSave = async (force = false) => {
     if (!selectedTeacherId || dayIndex === null) return;
     setSaving(true);
 
-    const changes: PeriodAdjustment[] = Object.entries(overrides).map(
-      ([period, o]) => ({
+    const changes: PeriodAdjustment[] = [];
+
+    for (const [period, o] of Object.entries(overrides)) {
+      const cell = dayCells.find((c) => c.period === Number(period));
+      if (!cell) continue;
+      changes.push({
         period: Number(period),
         sectionId: o.sectionId,
-        originalTeacherId:
-          dayCells.find((c) => c.period === Number(period))
-            ?.baseTeacherId ?? null,
+        isTag: false,
+        originalTeacherId: cell.baseTeacherId,
         newTeacherId: o.newTeacherId,
+        originalSubjectId: null,
+        newSubjectId: null,
+        originalRoomId: null,
+        newRoomId: null,
         reason: o.reason || null,
-        level: "ok" as const,
+        level: "ok",
         reasons: [],
-      })
-    );
+      });
+    }
+
+    for (const [period, to] of Object.entries(tagOverrides)) {
+      const cell = dayCells.find((c) => c.period === Number(period));
+      if (!cell || !cell.isTag) continue;
+      changes.push({
+        period: Number(period),
+        sectionId: cell.sectionId,
+        isTag: true,
+        originalTeacherId: cell.tagTeacherId,
+        newTeacherId: to.newTeacherId,
+        originalSubjectId: cell.tagSubjectId,
+        newSubjectId: to.newSubjectId,
+        originalRoomId: cell.tagRoomId,
+        newRoomId: to.newRoomId,
+        reason: null,
+        level: "ok",
+        reasons: [],
+      });
+    }
 
     const res = await saveAllAdjustments(date, changes, force);
     setSaving(false);
@@ -358,10 +494,21 @@ export function AdjustBuilder({
 
     toast.success(`Saved ${res.savedCount ?? 0} adjustment(s) for ${date}`);
     setOverrides({});
+    setTagOverrides({});
     router.refresh();
   };
 
-  const hasChanges = Object.keys(overrides).length > 0;
+  const hasChanges =
+    Object.keys(overrides).length > 0 ||
+    Object.keys(tagOverrides).length > 0;
+
+  const currentSheetCell = sheetPeriod
+    ? dayCells.find((c) => c.period === sheetPeriod)
+    : null;
+
+  const currentTagOverride = sheetPeriod
+    ? tagOverrides[sheetPeriod]
+    : undefined;
 
   return (
     <div className="space-y-5">
@@ -455,13 +602,17 @@ export function AdjustBuilder({
                       {selectedTeacher.short_name}
                     </h3>
                     <p className="text-sm text-slate-500">
-                      {selectedTeacher.teacher_code} — {DAY_LABEL_LIST[dayIndex!]}{" "}
-                      routine for {date}
+                      {selectedTeacher.teacher_code} —{" "}
+                      {DAY_LABEL_LIST[dayIndex!]} routine for {date}
                     </p>
                   </div>
                   {hasChanges && (
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={resetAll}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={resetAll}
+                      >
                         <RotateCcw className="mr-1 h-3.5 w-3.5" />
                         Reset all
                       </Button>
@@ -489,7 +640,7 @@ export function AdjustBuilder({
                           Class
                         </th>
                         <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
-                          Subject
+                          Session
                         </th>
                         <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
                           Status
@@ -513,12 +664,19 @@ export function AdjustBuilder({
                               )?.short_name
                             : null;
 
+                        const tagOv = tagOverrides[cell.period];
+                        const hasTagOverride = !!tagOv;
+                        const tagEffectiveSubject = tagOv?.newSubjectId
+                          ? subjectMap.get(tagOv.newSubjectId)?.name
+                          : cell.tagSubjectName;
+
                         return (
                           <tr
                             key={cell.period}
                             className={cn(
                               "transition-colors",
-                              hasOverride && "bg-amber-50"
+                              (hasOverride || hasTagOverride) &&
+                                "bg-amber-50"
                             )}
                           >
                             <td className="border border-slate-200 px-2 py-2 text-center text-xs font-bold text-slate-600">
@@ -534,8 +692,52 @@ export function AdjustBuilder({
                                 {cell.className}-{cell.sectionName}
                               </span>
                             </td>
-                            <td className="border border-slate-200 px-3 py-2 text-slate-700">
-                              {cell.subjectName}
+                            <td className="border border-slate-200 px-3 py-2">
+                              {/* Primary */}
+                              <div>
+                                <span className="text-sm font-medium text-slate-700">
+                                  {cell.subjectName}
+                                </span>
+                                <span className="ml-1 text-xs text-slate-500">
+                                  ·{" "}
+                                  {effectiveName ??
+                                    selectedTeacher.short_name}
+                                </span>
+                                {(hasOverride || cell.isAdjusted) && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="ml-1 text-[9px]"
+                                  >
+                                    Adj
+                                  </Badge>
+                                )}
+                              </div>
+                              {/* Tag row */}
+                              {cell.isTag && (
+                                <div className="mt-1 border-t border-dashed border-teal-200 pt-1">
+                                  <span className="text-sm font-medium text-teal-700">
+                                    {tagEffectiveSubject ?? "—"}
+                                  </span>
+                                  <span className="ml-1 text-xs text-teal-600">
+                                    ·{" "}
+                                    {teachers.find((t) => t.id === cell.tagEffectiveTeacherId)?.short_name || "—"}
+                                  </span>
+                                  {cell.isTagAdjusted && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="ml-1 bg-teal-100 text-[9px] text-teal-700"
+                                    >
+                                      Tag Adj
+                                    </Badge>
+                                  )}
+                                  <Badge
+                                    variant="secondary"
+                                    className="ml-1 bg-teal-100 text-[9px] text-teal-700"
+                                  >
+                                    Tag
+                                  </Badge>
+                                </div>
+                              )}
                             </td>
                             <td className="border border-slate-200 px-3 py-2">
                               {hasOverride || cell.isAdjusted ? (
@@ -558,14 +760,36 @@ export function AdjustBuilder({
                               )}
                             </td>
                             <td className="border border-slate-200 px-2 py-2 text-center">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleCellClick(cell.period)}
-                                className="h-7 text-xs"
-                              >
-                                Change
-                              </Button>
+                              <div className="flex flex-col gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    handleCellClick(
+                                      cell.period,
+                                      "primary"
+                                    )
+                                  }
+                                  className="h-6 text-[10px]"
+                                >
+                                  Change
+                                </Button>
+                                {cell.isTag && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      handleCellClick(
+                                        cell.period,
+                                        "tag"
+                                      )
+                                    }
+                                    className="h-6 text-[10px] text-teal-600"
+                                  >
+                                    Tag
+                                  </Button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -584,13 +808,89 @@ export function AdjustBuilder({
         <SheetContent side="right" className="w-full sm:max-w-sm">
           <SheetHeader>
             <SheetTitle>
-              Assign teacher — Period {sheetPeriod}
+              {sheetTab === "tag"
+                ? `Tag session — Period ${sheetPeriod}`
+                : `Assign teacher — Period ${sheetPeriod}`}
             </SheetTitle>
             <SheetDescription>
-              Select a free teacher for this period. Teachers already assigned
-              elsewhere at this time are excluded.
+              {sheetTab === "tag"
+                ? "Select a free teacher for the tag session. Overrides subject/room too."
+                : "Select a free teacher for this period. Teachers already assigned elsewhere at this time are excluded."}
             </SheetDescription>
           </SheetHeader>
+
+          {/* Tag session overrides (subject/room/teacher) */}
+          {sheetTab === "tag" && sheetPeriod && (
+            <div className="space-y-3 px-4 pt-2">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-teal-600">
+                  Tag Subject
+                </p>
+                <Select
+                  value={currentTagOverride?.newSubjectId ?? currentSheetCell?.tagSubjectId ?? "none"}
+                  onValueChange={(v) => {
+                    if (!sheetPeriod) return;
+                    setTagOverrides((prev) => ({
+                      ...prev,
+                      [sheetPeriod]: {
+                        ...prev[sheetPeriod],
+                        newSubjectId: v === "none" ? null : v,
+                      },
+                    }));
+                  }}
+                  items={[{ value: "none", label: "— Same —" }, ...subjects.map(s => ({ value: s.id, label: s.name }))]}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select subject" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Same —</SelectItem>
+                    {subjects.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-teal-600">
+                  Tag Room
+                </p>
+                <Select
+                  value={currentTagOverride?.newRoomId ?? currentSheetCell?.tagRoomId ?? "none"}
+                  onValueChange={(v) => {
+                    if (!sheetPeriod) return;
+                    setTagOverrides((prev) => ({
+                      ...prev,
+                      [sheetPeriod]: {
+                        ...prev[sheetPeriod],
+                        newRoomId: v === "none" ? null : v,
+                      },
+                    }));
+                  }}
+                  items={[{ value: "none", label: "— Same —" }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select room" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Same —</SelectItem>
+                    {rooms.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="border-t border-teal-200 pt-2">
+                <p className="text-xs font-medium text-teal-600 mb-1">
+                  Tag Teacher
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="px-4">
             <div className="relative mb-3">
@@ -603,7 +903,7 @@ export function AdjustBuilder({
               />
             </div>
 
-            <div className="max-h-[calc(100vh-18rem)] space-y-2 overflow-y-auto pr-1">
+            <div className="max-h-[calc(100vh-22rem)] space-y-2 overflow-y-auto pr-1">
               {filteredFreeTeachers.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">
                   No free teachers available
@@ -629,7 +929,9 @@ export function AdjustBuilder({
                     <button
                       key={t.id}
                       onClick={() =>
-                        handleAssign(sheetPeriod!, t.id)
+                        sheetTab === "tag"
+                          ? handleAssignTag(sheetPeriod!, t.id)
+                          : handleAssignPrimary(sheetPeriod!, t.id)
                       }
                       className={cn(
                         "w-full rounded-lg border p-3 text-left transition-colors hover:border-[#0d9488] hover:bg-[#0d9488]/5",
@@ -667,7 +969,10 @@ export function AdjustBuilder({
           </div>
 
           {sheetPeriod !== null &&
-            overrides[sheetPeriod]?.newTeacherId && (
+            ((sheetTab === "primary" && overrides[sheetPeriod]?.newTeacherId) ||
+              (sheetTab === "tag" &&
+                currentSheetCell?.isTag &&
+                currentTagOverride?.newTeacherId)) && (
               <div className="px-4 pt-3">
                 <Button
                   variant="outline"

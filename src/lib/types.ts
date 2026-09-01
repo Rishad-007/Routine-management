@@ -69,6 +69,7 @@ export interface RoutineRow {
   teacher_id: string | null;
   subject_id: string | null;
   room_id: string | null;
+  is_tag: boolean;
   is_adjusted: boolean;
   original_teacher_id: string | null;
 }
@@ -78,8 +79,13 @@ export interface AdjustmentRow {
   adjust_date: string;
   section_id: string;
   period_number: number;
+  is_tag: boolean;
   original_teacher_id: string | null;
   new_teacher_id: string | null;
+  original_subject_id: string | null;
+  new_subject_id: string | null;
+  original_room_id: string | null;
+  new_room_id: string | null;
   reason: string | null;
   created_by: string | null;
   created_at: string;

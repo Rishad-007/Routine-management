@@ -26,6 +26,7 @@ import type {
   TeacherRow,
   SubjectRow,
   RoutineRow,
+  AdjustmentRow,
 } from "@/lib/types";
 
 interface Props {
@@ -34,6 +35,7 @@ interface Props {
   teachers: TeacherRow[];
   subjects: SubjectRow[];
   routines: RoutineRow[];
+  adjustments: AdjustmentRow[];
   season: Season;
 }
 
@@ -52,6 +54,7 @@ export function HomeContent({
   teachers,
   subjects,
   routines,
+  adjustments,
   season,
 }: Props) {
   const [classId, setClassId] = useState<string>("");
@@ -66,17 +69,32 @@ export function HomeContent({
       (x) =>
         x.section_id === sectionId &&
         x.day === dayIndex &&
-        x.period_number === result.periodNumber
+        x.period_number === result.periodNumber &&
+        !x.is_tag
     );
     if (!r) return undefined;
-    const t = teachers.find((x) => x.id === r.teacher_id);
-    const s = subjects.find((x) => x.id === r.subject_id);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const adj = adjustments.find(
+      (a) =>
+        a.adjust_date === today &&
+        a.section_id === r.section_id &&
+        a.period_number === result.periodNumber &&
+        !a.is_tag
+    );
+
+    const teacherId = adj?.new_teacher_id ?? r.teacher_id;
+    const subjectId = adj?.new_subject_id ?? r.subject_id;
+
+    const t = teachers.find((x) => x.id === teacherId);
+    const s = subjects.find((x) => x.id === subjectId);
     return {
       subject: s?.name,
       teacher: t?.short_name,
       room: r.room_id ? "Room" : undefined,
+      isAdjusted: !!adj,
     };
-  }, [sectionId, routines, teachers, subjects, result, dayIndex]);
+  }, [sectionId, routines, teachers, subjects, result, dayIndex, adjustments]);
 
   return (
     <div className="space-y-8">

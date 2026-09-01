@@ -3,6 +3,7 @@
 import { cn } from "@/lib/utils";
 import { DAY_LABEL_LIST, PERIOD_ORDER, TIFFIN_AFTER_PERIOD, type Season } from "@/lib/constants";
 import { useCurrentPeriod } from "@/hooks/use-current-period";
+import { Badge } from "@/components/ui/badge";
 
 export interface RoutineCell {
   subject?: string;
@@ -10,6 +11,12 @@ export interface RoutineCell {
   teacher?: string;
   room?: string;
   classLabel?: string;
+  subject2?: string;
+  teacher2?: string;
+  room2?: string;
+  isTag?: boolean;
+  isAdjusted?: boolean;
+  isTagAdjusted?: boolean;
 }
 
 export type RoutineMatrix = Record<number, Record<number, RoutineCell | undefined>>;
@@ -81,11 +88,14 @@ export function RoutineGrid({
                     className={cn(
                       "border border-slate-200 px-2 py-1.5 text-center align-middle",
                       isHighlight ? "bg-[#0d9488]/15 ring-1 ring-inset ring-[#0d9488]" : "bg-white",
-                      p === TIFFIN_AFTER_PERIOD && "border-r-2 border-r-amber-300"
+                      p === TIFFIN_AFTER_PERIOD && "border-r-2 border-r-amber-300",
+                      cell?.isAdjusted && "bg-amber-50/50",
+                      cell?.isTag && "border-b-2 border-b-teal-300"
                     )}
                   >
                     {cell ? (
                       <div className={cn(variant === "compact" ? "space-y-0.5" : "space-y-0.5")}>
+                        {/* Primary session */}
                         <p className="font-medium text-[#1e3a5f]">
                           {variant === "compact"
                             ? cell.subjectShort || cell.subject || "—"
@@ -96,6 +106,39 @@ export function RoutineGrid({
                             {cell.teacher || "—"}
                             {cell.room ? ` · ${cell.room}` : ""}
                           </p>
+                        )}
+                        {cell.isAdjusted && (
+                          <Badge variant="secondary" className="text-[8px] bg-amber-100 text-amber-700 px-1 py-0">
+                            Adj
+                          </Badge>
+                        )}
+
+                        {/* Tag session */}
+                        {cell.isTag && (
+                          <>
+                            <div className="my-0.5 border-t border-dashed border-teal-200" />
+                            <p className="font-medium text-teal-700">
+                              {variant === "compact"
+                                ? cell.subject2 || "—"
+                                : cell.subject2 || "—"}
+                            </p>
+                            {variant !== "compact" && (
+                              <p className="text-xs text-teal-600">
+                                {cell.teacher2 || "—"}
+                                {cell.room2 ? ` · ${cell.room2}` : ""}
+                              </p>
+                            )}
+                            <div className="flex justify-center gap-1">
+                              <Badge variant="secondary" className="text-[8px] bg-teal-100 text-teal-700 px-1 py-0">
+                                Tag
+                              </Badge>
+                              {cell.isTagAdjusted && (
+                                <Badge variant="secondary" className="text-[8px] bg-amber-100 text-amber-700 px-1 py-0">
+                                  Adj
+                                </Badge>
+                              )}
+                            </div>
+                          </>
                         )}
                       </div>
                     ) : (

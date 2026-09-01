@@ -12,15 +12,18 @@ export interface TeacherDayLoad {
   reasons: string[];
 }
 
-/** Returns the count of periods a teacher has on a given day. */
+/** Returns the count of distinct periods a teacher has on a given day. */
 export function countDayPeriods(
   routines: RoutineRow[],
   teacherId: string,
   day: number
 ): number {
-  return routines.filter(
-    (r) => r.day === day && r.teacher_id === teacherId
-  ).length;
+  const periods = new Set(
+    routines
+      .filter((r) => r.day === day && r.teacher_id === teacherId)
+      .map((r) => r.period_number)
+  );
+  return periods.size;
 }
 
 /** Longest consecutive run of periods for a teacher on a day (tiffin breaks continuity). */
@@ -29,10 +32,11 @@ export function longestConsecutiveStretch(
   teacherId: string,
   day: number
 ): number {
-  const periods = routines
-    .filter((r) => r.day === day && r.teacher_id === teacherId)
-    .map((r) => r.period_number)
-    .sort((a, b) => a - b);
+  const periods = [...new Set(
+    routines
+      .filter((r) => r.day === day && r.teacher_id === teacherId)
+      .map((r) => r.period_number)
+  )].sort((a, b) => a - b);
 
   let best = 0;
   let run = 0;
@@ -198,13 +202,18 @@ export function weeklyLoad(
   teacherId: string
 ): WeeklyLoad {
   const perDay: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 };
-  let total = 0;
+  const countedPeriods = new Map<number, Set<number>>();
   for (const r of routines) {
     if (r.teacher_id === teacherId) {
-      perDay[r.day] = (perDay[r.day] ?? 0) + 1;
-      total++;
+      if (!countedPeriods.has(r.day)) countedPeriods.set(r.day, new Set());
+      const periods = countedPeriods.get(r.day)!;
+      if (!periods.has(r.period_number)) {
+        periods.add(r.period_number);
+        perDay[r.day] = (perDay[r.day] ?? 0) + 1;
+      }
     }
   }
+  const total = Object.values(perDay).reduce((a, b) => a + b, 0);
   const todayLevels = [0, 1, 2, 3, 4].map((d) =>
     teacherDayLoad(routines, teacherId, d).level
   );

@@ -27,11 +27,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Trash2,
   Plus,
   Save,
   GripVertical,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -65,6 +67,10 @@ interface Cell {
   teacherId: string | null;
   roomId: string | null;
   isAdjusted: boolean;
+  isTag: boolean;
+  subjectId2: string | null;
+  teacherId2: string | null;
+  roomId2: string | null;
 }
 
 type Matrix = Record<number, Record<number, Cell | undefined>>;
@@ -74,6 +80,10 @@ const emptyCell = (): Cell => ({
   teacherId: null,
   roomId: null,
   isAdjusted: false,
+  isTag: false,
+  subjectId2: null,
+  teacherId2: null,
+  roomId2: null,
 });
 
 function SortableCell({
@@ -176,12 +186,34 @@ export function RoutineBuilder({
     for (const r of routines) {
       if (r.section_id !== id) continue;
       if (!m[r.day]) m[r.day] = {};
-      m[r.day][r.period_number] = {
-        subjectId: r.subject_id,
-        teacherId: r.teacher_id,
-        roomId: r.room_id,
-        isAdjusted: r.is_adjusted,
-      };
+
+      if (r.is_tag) {
+        const primary = m[r.day][r.period_number];
+        if (primary) {
+          primary.subjectId2 = r.subject_id;
+          primary.teacherId2 = r.teacher_id;
+          primary.roomId2 = r.room_id;
+        } else {
+          m[r.day][r.period_number] = {
+            ...emptyCell(),
+            subjectId2: r.subject_id,
+            teacherId2: r.teacher_id,
+            roomId2: r.room_id,
+          };
+        }
+      } else {
+        const existing = m[r.day][r.period_number];
+        m[r.day][r.period_number] = {
+          subjectId: r.subject_id,
+          teacherId: r.teacher_id,
+          roomId: r.room_id,
+          isAdjusted: r.is_adjusted,
+          isTag: existing?.teacherId2 !== null,
+          subjectId2: existing?.subjectId2 ?? null,
+          teacherId2: existing?.teacherId2 ?? null,
+          roomId2: existing?.roomId2 ?? null,
+        };
+      }
     }
     setMatrix(m);
     setSelected(null);
@@ -263,13 +295,28 @@ export function RoutineBuilder({
       for (const period of Object.keys(matrix[Number(day)] ?? {})) {
         const c = matrix[Number(day)][Number(period)];
         if (!c) continue;
-        edits.push({
-          day: Number(day),
-          period: Number(period),
-          subjectId: c.subjectId,
-          teacherId: c.teacherId,
-          roomId: c.roomId,
-        });
+        // Primary session
+        if (c.subjectId || c.teacherId || c.roomId) {
+          edits.push({
+            day: Number(day),
+            period: Number(period),
+            subjectId: c.subjectId,
+            teacherId: c.teacherId,
+            roomId: c.roomId,
+            isTag: false,
+          });
+        }
+        // Tag session (second row)
+        if (c.isTag && (c.subjectId2 || c.teacherId2 || c.roomId2)) {
+          edits.push({
+            day: Number(day),
+            period: Number(period),
+            subjectId: c.subjectId2,
+            teacherId: c.teacherId2,
+            roomId: c.roomId2,
+            isTag: true,
+          });
+        }
       }
     }
     return edits;
@@ -403,6 +450,7 @@ export function RoutineBuilder({
                         const isSel =
                           selected?.day === di && selected?.period === p;
                         const subj = cell?.subjectId ? subjectNames.get(cell.subjectId) : undefined;
+                        const subj2 = cell?.subjectId2 ? subjectNames.get(cell.subjectId2) : undefined;
                         const hasContent = !!cell?.subjectId || !!cell?.teacherId;
                         return (
                           <SortableCell
@@ -415,6 +463,7 @@ export function RoutineBuilder({
                           >
                             {hasContent ? (
                               <div className="flex flex-col items-center gap-0.5">
+                                {/* Primary session */}
                                 <span className="font-medium text-[#1e3a5f]">
                                   {subj?.name ?? "—"}
                                 </span>
@@ -427,6 +476,31 @@ export function RoutineBuilder({
                                   <span className="text-[10px] text-slate-400">
                                     {roomNames.get(cell.roomId)}
                                   </span>
+                                )}
+                                {/* Tag session */}
+                                {cell?.isTag && (
+                                  <>
+                                    <div className="my-0.5 w-full border-t border-dashed border-slate-300" />
+                                    <span className="font-medium text-teal-700">
+                                      {subj2?.name ?? "—"}
+                                    </span>
+                                    {cell?.teacherId2 && (
+                                      <span className="text-[11px] text-teal-600">
+                                        {teacherNames.get(cell.teacherId2) ?? "—"}
+                                      </span>
+                                    )}
+                                    {cell?.roomId2 && (
+                                      <span className="text-[10px] text-teal-500">
+                                        {roomNames.get(cell.roomId2)}
+                                      </span>
+                                    )}
+                                    <Badge
+                                      variant="secondary"
+                                      className="mt-0.5 bg-teal-100 text-[9px] text-teal-700"
+                                    >
+                                      Tag
+                                    </Badge>
+                                  </>
                                 )}
                               </div>
                             ) : (
@@ -463,6 +537,37 @@ export function RoutineBuilder({
                 </div>
 
                 <div className="space-y-3">
+                  {/* Tag toggle */}
+                  <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-slate-500" />
+                      <span className="text-sm font-medium text-slate-700">Tag (2 teachers)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateCell(selected.day, selected.period, {
+                          isTag: !selectedCell?.isTag,
+                          subjectId2: selectedCell?.isTag ? null : selectedCell?.subjectId2,
+                          teacherId2: selectedCell?.isTag ? null : selectedCell?.teacherId2,
+                          roomId2: selectedCell?.isTag ? null : selectedCell?.roomId2,
+                        })
+                      }
+                      className={cn(
+                        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors",
+                        selectedCell?.isTag ? "bg-[#0d9488]" : "bg-slate-300"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow ring-0 transition-transform",
+                          selectedCell?.isTag ? "translate-x-4" : "translate-x-0"
+                        )}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Primary session */}
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-slate-500">Subject</p>
                     <Select
@@ -538,6 +643,88 @@ export function RoutineBuilder({
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {/* Tag session fields */}
+                  {selectedCell?.isTag && (
+                    <div className="space-y-3 rounded-lg border border-teal-200 bg-teal-50/50 p-3">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-teal-700">
+                        <Users className="h-3.5 w-3.5" />
+                        Tag Session
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-teal-600">Subject</p>
+                        <Select
+                          value={selectedCell?.subjectId2 ?? "none"}
+                          onValueChange={(v) =>
+                            updateCell(selected.day, selected.period, {
+                              subjectId2: v === "none" ? null : (v ?? null),
+                            })
+                          }
+                          items={[{ value: "none", label: "— None —" }, ...subjects.map(s => ({ value: s.id, label: s.name }))]}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select subject" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">— None —</SelectItem>
+                            {subjects.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-teal-600">Teacher</p>
+                        <Select
+                          value={selectedCell?.teacherId2 ?? "none"}
+                          onValueChange={(v) =>
+                            updateCell(selected.day, selected.period, {
+                              teacherId2: v === "none" ? null : (v ?? null),
+                            })
+                          }
+                          items={[{ value: "none", label: "— None —" }, ...teachersForSubject(selectedCell?.subjectId2 ?? null).map(t => ({ value: t.id, label: t.short_name }))]}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Assign teacher" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">— None —</SelectItem>
+                            {teachersForSubject(selectedCell?.subjectId2 ?? null).map((t) => (
+                              <SelectItem key={t.id} value={t.id}>
+                                {t.short_name}
+                                {t.is_open_teacher ? " (open)" : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-teal-600">Room</p>
+                        <Select
+                          value={selectedCell?.roomId2 ?? "none"}
+                          onValueChange={(v) =>
+                            updateCell(selected.day, selected.period, {
+                              roomId2: v === "none" ? null : (v ?? null),
+                            })
+                          }
+                          items={[{ value: "none", label: "— None —" }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Assign room" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">— None —</SelectItem>
+                            {rooms.map((r) => (
+                              <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}

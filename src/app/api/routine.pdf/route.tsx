@@ -16,6 +16,7 @@ import type {
   SubjectRow,
   RoomRow,
   ClassRow,
+  AdjustmentRow,
 } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -98,7 +99,7 @@ const styles = StyleSheet.create({
 async function getSectionRoutine(sectionId: string) {
   const admin = createAdminClient();
 
-  const [secRes, routinesRes, teachersRes, subjectsRes, roomsRes, classesRes] =
+  const [secRes, routinesRes, teachersRes, subjectsRes, roomsRes, classesRes, adjRes] =
     await Promise.all([
       admin.from("sections").select("*").eq("id", sectionId).single(),
       admin.from("routines").select("*").eq("section_id", sectionId),
@@ -106,6 +107,7 @@ async function getSectionRoutine(sectionId: string) {
       admin.from("subjects").select("*"),
       admin.from("rooms").select("*"),
       admin.from("classes").select("*"),
+      admin.from("adjustments").select("*").eq("adjust_date", new Date().toISOString().slice(0, 10)),
     ]);
 
   const section = secRes.data as SectionRow | null;
@@ -117,15 +119,73 @@ async function getSectionRoutine(sectionId: string) {
   const cls = ((classesRes.data ?? []) as ClassRow[]).find((c) => c.id === section.class_id);
   const label = cls ? `${cls.name} — Section ${section.name}` : `Section ${section.name}`;
 
-  const matrix: Record<number, Record<number, { subject?: string; teacher?: string; room?: string }>> = {};
+  const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
+
+  const matrix: Record<number, Record<number, { subject?: string; teacher?: string; room?: string; subject2?: string; teacher2?: string; room2?: string; isTag?: boolean; isAdjusted?: boolean }>> = {};
+
+  // Group by day+period: primary + tag
+  const byDayPeriod = new Map<string, { primary: RoutineRow; tag: RoutineRow | null }>();
   for (const r of routines) {
-    if (!matrix[r.day]) matrix[r.day] = {};
-    matrix[r.day][r.period_number] = {
-      subject: r.subject_id ? subjects.get(r.subject_id)?.name : undefined,
-      teacher: r.teacher_id ? teachers.get(r.teacher_id)?.short_name : undefined,
-      room: r.room_id ? rooms.get(r.room_id)?.name : undefined,
+    const key = `${r.day}:${r.period_number}`;
+    if (r.is_tag) {
+      const existing = byDayPeriod.get(key);
+      if (existing) existing.tag = r;
+    } else {
+      if (!byDayPeriod.has(key)) byDayPeriod.set(key, { primary: r, tag: null });
+      byDayPeriod.get(key)!.primary = r;
+    }
+  }
+
+  // today's adjustments already filtered in the query
+  for (const [key, { primary, tag }] of byDayPeriod) {
+    const [dayStr, periodStr] = key.split(":");
+    const day = Number(dayStr);
+    const period = Number(periodStr);
+
+    let subjectId = primary.subject_id;
+    let teacherId = primary.teacher_id;
+    let roomId = primary.room_id;
+    let isAdjusted = false;
+
+    const adj = adjustments.find(
+      (a) => a.period_number === period && a.section_id === sectionId && !a.is_tag
+    );
+    if (adj) {
+      if (adj.new_teacher_id) teacherId = adj.new_teacher_id;
+      if (adj.new_subject_id) subjectId = adj.new_subject_id;
+      if (adj.new_room_id) roomId = adj.new_room_id;
+      isAdjusted = true;
+    }
+
+    let subject2 = tag ? (tag.subject_id ? subjects.get(tag.subject_id)?.name : undefined) : undefined;
+    let teacher2 = tag ? (tag.teacher_id ? teachers.get(tag.teacher_id)?.short_name : undefined) : undefined;
+    let room2 = tag ? (tag.room_id ? rooms.get(tag.room_id)?.name : undefined) : undefined;
+    const isTag = !!tag;
+
+    if (tag) {
+      const tagAdj = adjustments.find(
+        (a) => a.period_number === period && a.section_id === sectionId && a.is_tag
+      );
+      if (tagAdj) {
+        if (tagAdj.new_teacher_id) teacher2 = teachers.get(tagAdj.new_teacher_id)?.short_name;
+        if (tagAdj.new_subject_id) subject2 = subjects.get(tagAdj.new_subject_id)?.name;
+        if (tagAdj.new_room_id) room2 = rooms.get(tagAdj.new_room_id)?.name;
+      }
+    }
+
+    if (!matrix[day]) matrix[day] = {};
+    matrix[day][period] = {
+      subject: subjectId ? subjects.get(subjectId)?.name : undefined,
+      teacher: teacherId ? teachers.get(teacherId)?.short_name : undefined,
+      room: roomId ? rooms.get(roomId)?.name : undefined,
+      subject2,
+      teacher2,
+      room2,
+      isTag,
+      isAdjusted,
     };
   }
+
   return { label, matrix };
 }
 
@@ -177,6 +237,21 @@ export async function GET(req: NextRequest) {
                           <Text style={styles.teacher}>{cell.teacher}</Text>
                         )}
                         {cell.room && <Text style={styles.room}>{cell.room}</Text>}
+                        {cell.isAdjusted && (
+                          <Text style={{ fontSize: 6, color: "#d97706" }}>Adj</Text>
+                        )}
+                        {cell.isTag && (
+                          <>
+                            <Text style={{ fontSize: 6, color: "#0d9488", marginTop: 2 }}>— Tag —</Text>
+                            <Text style={{ fontSize: 7, color: "#0d9488" }}>{cell.subject2 ?? ""}</Text>
+                            {cell.teacher2 && (
+                              <Text style={{ fontSize: 6, color: "#0d9488" }}>{cell.teacher2}</Text>
+                            )}
+                            {cell.room2 && (
+                              <Text style={{ fontSize: 6, color: "#999" }}>{cell.room2}</Text>
+                            )}
+                          </>
+                        )}
                       </>
                     ) : (
                       <Text style={styles.empty}>—</Text>

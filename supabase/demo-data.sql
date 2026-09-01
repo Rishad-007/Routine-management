@@ -3,18 +3,15 @@
 -- Cantonment Public School & College, Rangpur
 --
 --  RUN THIS AFTER schema.sql (in Supabase SQL Editor).
---  🔥 This DELETES all existing master data + routines and
---     replaces them with a large, self-consistent demo dataset
---     purpose-built so you can verify every feature/test case.
+--  This DELETES all existing master data + routines and
+--     replaces them with a large, self-consistent demo dataset.
 --
 --  What you get:
 --    • 5 classes, 21 teachers, 10 subjects, 24 rooms, 15 sections
---    • 15 sections x 5 days x 7 periods = 525 routine cells
---    • Deliberately planted conflict scenarios (see block
---      "CONFLICT SCENARIOS FOR TESTING"): 4-consecutive (red),
---      3-consecutive (yellow), 6/day overload (red), and a
---      cross-section double-booked teacher (red).
---    • A few date-scoped adjustments for the Adjust page.
+--    • 15 sections x 5 days x 7 periods = 525 primary routine cells
+--    • Tag (2-teacher) rows on select cells for testing dual-teacher display
+--    • Conflict scenarios (4-consecutive, 3-consecutive, 6/day, double-booked)
+--    • Date-scoped adjustments including TODAY for adjust page testing
 -- ============================================================
 
 begin;
@@ -89,7 +86,6 @@ insert into teachers (teacher_code, full_name, short_name, is_open_teacher, prim
   ('T21', 'Rubina Begum',           'Mrs. Rubina', true, (select id from subjects where short_name='PE'));
 
 -- ---------- SECTIONS (3 per class = 15) ----------
--- Each section gets its own default classroom (room_id) for realism.
 with sec_list as (
   select c.id as class_id, sec.class_name, sec.name,
          row_number() over (order by sec.class_name, sec.name) - 1 as rn
@@ -111,7 +107,6 @@ from sec_list sl
 join srooms r on r.rn = sl.rn % 10;
 
 -- ---------- TEACHER_SUBJECTS (many-to-many) ----------
--- Each teacher teaches their primary subject + 1 related subject.
 insert into teacher_subjects (teacher_id, subject_id)
 select t.id, s.id
 from teachers t
@@ -129,20 +124,18 @@ join subjects s
   or (t.primary_subject_id = (select id from subjects where short_name='PE') and s.id = (select id from subjects where short_name='Bio'));
 
 -- =============================================================
---  ROUTINES — FULL WEEK FOR EVERY SECTION
---  Generator: 15 sections x 5 days x 7 periods = 525 cells.
---  Subject per cell rotates across the week; teacher is chosen
---  deterministically from that subject's eligible pool, rotating
---  per section so most sections are naturally conflict-free.
+--  ROUTINES — FULL WEEK FOR EVERY SECTION (primary only)
+--  15 sections x 5 days x 7 periods = 525 primary cells
 -- =============================================================
-insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id)
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
 select
   s.id,
   d.day,
   p.period,
   t.id,
   sub.id,
-  s.room_id
+  s.room_id,
+  false
 from sections s
 join (
   select row_number() over (order by c.sort_order, se.name) - 1 as seq, se.id as sid
@@ -173,62 +166,125 @@ cross join lateral (
 join teachers t on t.teacher_code = tc.teacher_code;
 
 -- =============================================================
---  CONFLICT SCENARIOS FOR TESTING
---  These deliberately plant warnings so you can verify the
---  conflict engine. Each is tagged with what it should produce.
+--  TAG (2-TEACHER) ROUTINES
+--  Adds a secondary (tag) teacher for select cells so you can
+--  verify dual-teacher display, tag toggle, and tag overrides.
 -- =============================================================
 
--- Scenario A: RED — 4 consecutive periods (a teacher's full day).
---   Section 8-A, Monday (day 1), periods 1-4 -> Mr. Karim (T01, Bangla).
---   Expected: 4 consecutive = RED.
+-- Tag A: Class 6-A, Sunday periods 1+3 — Physics + Bio practicals
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
+select s.id, 0, 1, t.id, sub.id, (select id from rooms where name='Science Lab'), true
+from sections s
+join classes c on c.id = s.class_id
+join teachers t on t.teacher_code = 'T11'
+join subjects sub on sub.short_name = 'Phy'
+where c.name = 'Class 6' and s.name = 'A';
+
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
+select s.id, 0, 3, t.id, sub.id, (select id from rooms where name='Science Lab'), true
+from sections s
+join classes c on c.id = s.class_id
+join teachers t on t.teacher_code = 'T15'
+join subjects sub on sub.short_name = 'Bio'
+where c.name = 'Class 6' and s.name = 'A';
+
+-- Tag B: Class 8-A, Monday periods 3+4 — Chemistry practical + Math
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
+select s.id, 1, 3, t.id, sub.id, (select id from rooms where name='Science Lab'), true
+from sections s
+join classes c on c.id = s.class_id
+join teachers t on t.teacher_code = 'T13'
+join subjects sub on sub.short_name = 'Che'
+where c.name = 'Class 8' and s.name = 'A';
+
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
+select s.id, 1, 4, t.id, sub.id, (select id from rooms where name='Room 102'), true
+from sections s
+join classes c on c.id = s.class_id
+join teachers t on t.teacher_code = 'T09'
+join subjects sub on sub.short_name = 'Math'
+where c.name = 'Class 8' and s.name = 'A';
+
+-- Tag C: Class 9-A, Sunday periods 2+5 — English speaking + Computer
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
+select s.id, 0, 2, t.id, sub.id, (select id from rooms where name='Room 104'), true
+from sections s
+join classes c on c.id = s.class_id
+join teachers t on t.teacher_code = 'T06'
+join subjects sub on sub.short_name = 'Eng'
+where c.name = 'Class 9' and s.name = 'A';
+
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
+select s.id, 0, 5, t.id, sub.id, (select id from rooms where name='Computer Lab'), true
+from sections s
+join classes c on c.id = s.class_id
+join teachers t on t.teacher_code = 'T20'
+join subjects sub on sub.short_name = 'Cmp'
+where c.name = 'Class 9' and s.name = 'A';
+
+-- Tag D: Class 10-B, Tuesday periods 1+2 — PE + Isl
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
+select s.id, 2, 1, t.id, sub.id, (select id from rooms where name='Multi-Purpose Hall'), true
+from sections s
+join classes c on c.id = s.class_id
+join teachers t on t.teacher_code = 'T21'
+join subjects sub on sub.short_name = 'PE'
+where c.name = 'Class 10' and s.name = 'B';
+
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
+select s.id, 2, 2, t.id, sub.id, (select id from rooms where name='Room 108'), true
+from sections s
+join classes c on c.id = s.class_id
+join teachers t on t.teacher_code = 'T18'
+join subjects sub on sub.short_name = 'Isl'
+where c.name = 'Class 10' and s.name = 'B';
+
+-- =============================================================
+--  CONFLICT SCENARIOS FOR TESTING
+-- =============================================================
+
+-- Scenario A: RED — 4 consecutive periods (Mr. Karim, 8-A, Mon)
 update routines r set teacher_id = t.id, subject_id = s.id
 from teachers t, subjects s, sections sec, classes c
 where t.teacher_code='T01' and s.short_name='Bng'
   and sec.name='A' and c.name='Class 8' and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=1 and r.period_number in (1,2,3,4);
+  and r.day=1 and r.period_number in (1,2,3,4) and r.is_tag=false;
 
--- Scenario B: RED — 6 periods in one day (daily overload).
---   Section 9-B, Tuesday (day 2) -> Mr. Anwar (T09, Mathematics) in 6 periods.
---   Expected: 6/day = RED (also gives a 3-consecutive = yellow, on top).
+-- Scenario B: RED — 6 periods in one day (Mr. Anwar, 9-B, Tue)
 update routines r set teacher_id = t.id, subject_id = s.id
 from teachers t, subjects s, sections sec, classes c
 where t.teacher_code='T09' and s.short_name='Math'
   and sec.name='B' and c.name='Class 9' and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=2 and r.period_number in (1,2,4,5,6,7);
+  and r.day=2 and r.period_number in (1,2,4,5,6,7) and r.is_tag=false;
 
--- Scenario C: RED — same teacher double-booked across two sections.
---   Teacher Ms. Christina (T06, English) on Wednesday (day 2), period 3,
---   in BOTH 7-A and 7-B. Expected: busy = RED, plus an overload warning.
+-- Scenario C: RED — double-booked (Ms. Christina, 7-A & 7-B, Wed period 3)
 update routines r set teacher_id = t.id, subject_id = s.id
 from teachers t, subjects s, sections sec, classes c
 where t.teacher_code='T06' and s.short_name='Eng'
   and c.name in ('Class 7') and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=2 and r.period_number=3;
+  and r.day=2 and r.period_number=3 and r.is_tag=false;
 
--- Scenario D: YELLOW — exactly 3 consecutive periods.
---   Section 6-A, Sunday (day 0), periods 1-3 -> Mr. William (T04, English).
---   Expected: 3 consecutive = YELLOW.
+-- Scenario D: YELLOW — 3 consecutive (Mr. William, 6-A, Sun periods 1-3)
 update routines r set teacher_id = t.id, subject_id = s.id
 from teachers t, subjects s, sections sec, classes c
 where t.teacher_code='T04' and s.short_name='Eng'
   and sec.name='A' and c.name='Class 6' and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=0 and r.period_number in (1,2,3);
+  and r.day=0 and r.period_number in (1,2,3) and r.is_tag=false;
 
--- Scenario E: YELLOW — 5 periods in one day (daily overload threshold).
---   Section 10-C, Thursday (day 4) -> Mrs. Shahana (T08, Mathematics) in 5.
---   Expected: 5/day = YELLOW.
+-- Scenario E: YELLOW — 5 periods in one day (Mrs. Shahana, 10-C, Thu)
 update routines r set teacher_id = t.id, subject_id = s.id
 from teachers t, subjects s, sections sec, classes c
 where t.teacher_code='T08' and s.short_name='Math'
   and sec.name='C' and c.name='Class 10' and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=4 and r.period_number in (1,2,4,5,6);
+  and r.day=4 and r.period_number in (1,2,4,5,6) and r.is_tag=false;
 
 -- =============================================================
---  ADJUSTMENTS (date-scoped substitutions for the Adjust page)
---  Applies ONLY on the given date; base routine is untouched.
+--  ADJUSTMENTS
+--  Primary adjustments for testing the Adjust page.
+--  Includes a TODAY adjustment so you can see it live.
 -- =============================================================
--- Substitute on 2026-09-01 (Tue): 8-A period 3 (Karim -> Fatema, "sick"),
--- and 8-B period 5 (no substitution tracked here).
+
+-- Past adjustment (will be auto-deleted by trigger on next write)
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, reason)
 select '2026-09-01',
        sec.id,
@@ -249,8 +305,51 @@ select '2026-09-01',
 from sections sec join classes c on c.id = sec.class_id
 where c.name = 'Class 9' and sec.name = 'C';
 
+-- TODAY adjustment — Primary: 6-A period 2 (Mr. William -> Mrs. Fatema)
+insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
+select CURRENT_DATE,
+       sec.id,
+       2,
+       (select id from teachers where teacher_code='T04'),
+       (select id from teachers where teacher_code='T02'),
+       (select id from subjects where short_name='Eng'),
+       (select id from subjects where short_name='Bng'),
+       (select id from rooms where name='Room 101'),
+       'Covering class — teacher absent'
+from sections sec join classes c on c.id = sec.class_id
+where c.name = 'Class 6' and sec.name = 'A';
+
+-- TODAY adjustment — Primary: 8-A period 1 (Mr. Karim -> Mr. Monir)
+insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
+select CURRENT_DATE,
+       sec.id,
+       1,
+       (select id from teachers where teacher_code='T01'),
+       (select id from teachers where teacher_code='T07'),
+       (select id from subjects where short_name='Bng'),
+       (select id from subjects where short_name='Math'),
+       (select id from rooms where name='Room 102'),
+       'Emergency leave cover'
+from sections sec join classes c on c.id = sec.class_id
+where c.name = 'Class 8' and sec.name = 'A';
+
+-- TODAY adjustment — Tag: 6-A period 3 (Mr. Mahmud -> Dr. Amina, Bio -> Phy)
+insert into adjustments (adjust_date, section_id, period_number, is_tag, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
+select CURRENT_DATE,
+       sec.id,
+       3,
+       true,
+       (select id from teachers where teacher_code='T15'),
+       (select id from teachers where teacher_code='T10'),
+       (select id from subjects where short_name='Bio'),
+       (select id from subjects where short_name='Phy'),
+       (select id from rooms where name='Science Lab'),
+       'Tag teacher swap'
+from sections sec join classes c on c.id = sec.class_id
+where c.name = 'Class 6' and sec.name = 'A';
+
 -- =============================================================
---  SUMMARY (so you can eyeball row counts)
+--  SUMMARY
 -- =============================================================
 select 'classes' as entity, count(*) as rows from classes
 union all select 'rooms', count(*) from rooms
@@ -258,7 +357,9 @@ union all select 'subjects', count(*) from subjects
 union all select 'teachers', count(*) from teachers
 union all select 'sections', count(*) from sections
 union all select 'teacher_subjects', count(*) from teacher_subjects
-union all select 'routines', count(*) from routines
+union all select 'routines (total)', count(*) from routines
+union all select 'routines (primary)', count(*) from routines where is_tag=false
+union all select 'routines (tag)', count(*) from routines where is_tag=true
 union all select 'adjustments', count(*) from adjustments;
 
 commit;

@@ -69,7 +69,11 @@ export async function getRoutines(sectionId?: string): Promise<RoutineRow[]> {
 }
 
 export async function getAdjustments(): Promise<AdjustmentRow[]> {
-  const { data, error } = await db().from("adjustments").select("*");
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await db()
+    .from("adjustments")
+    .select("*")
+    .gte("adjust_date", today);
   if (error) throw new Error(error.message);
   return (data as AdjustmentRow[]) ?? [];
 }

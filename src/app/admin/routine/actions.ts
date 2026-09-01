@@ -15,6 +15,7 @@ export interface MatrixEdit {
   subjectId: string | null;
   teacherId: string | null;
   roomId: string | null;
+  isTag: boolean;
 }
 
 export interface ConflictWarning {
@@ -50,7 +51,7 @@ export async function saveSectionRoutine(
   // Existing routines for all sections (for conflict checks).
   const { data: allRoutines, error: rErr } = await admin
     .from("routines")
-    .select("id, section_id, day, period_number, teacher_id, subject_id, room_id");
+    .select("id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag");
   if (rErr) return { error: rErr.message };
 
   // Build simulated routine set: other sections as-is + this section's new rows.
@@ -63,6 +64,7 @@ export async function saveSectionRoutine(
     teacher_id: e.teacherId,
     subject_id: e.subjectId,
     room_id: e.roomId,
+    is_tag: e.isTag,
     is_adjusted: false,
     original_teacher_id: null,
   }));
@@ -132,6 +134,7 @@ export async function saveSectionRoutine(
       teacher_id: e.teacherId,
       subject_id: e.subjectId,
       room_id: e.roomId,
+      is_tag: e.isTag,
     }));
 
   if (insertRows.length > 0) {

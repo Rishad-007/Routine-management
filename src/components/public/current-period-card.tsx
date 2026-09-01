@@ -17,6 +17,7 @@ interface CellInfo {
   subject?: string;
   teacher?: string;
   room?: string;
+  isAdjusted?: boolean;
 }
 
 export function CurrentPeriodCard({
@@ -100,6 +101,11 @@ export function CurrentPeriodCard({
                 <div className="flex items-center gap-2 text-slate-600">
                   <BookOpen className="h-4 w-4 text-[#0d9488]" />
                   {currentCell.subject}
+                  {currentCell.isAdjusted && (
+                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                      Adjusted
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 text-slate-600">
                   <User className="h-4 w-4 text-[#0d9488]" />
