@@ -125,7 +125,7 @@ export function AdminsTab({ admins }: { admins: AdminRow[] }) {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Role</Label>
-              <Select value={role} onValueChange={(v) => v && setRole(v as "super" | "admin")}>
+              <Select value={role} onValueChange={(v) => v && setRole(v as "super" | "admin")} items={[{ value: "admin", label: "Admin" }, { value: "super", label: "Super" }]}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>

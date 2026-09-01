@@ -136,7 +136,7 @@ export function AdjustBuilder({
       <div className="flex flex-wrap items-end gap-4 rounded-xl border bg-white p-4 shadow-sm">
         <div className="space-y-1">
           <p className="text-xs font-medium text-slate-500">Class</p>
-          <Select value={classId} onValueChange={(v) => setClassId(v ?? "")}>
+          <Select value={classId} onValueChange={(v) => setClassId(v ?? "")} items={classes.map(c => ({ value: c.id, label: c.name }))}>
             <SelectTrigger className="w-44">
               <SelectValue placeholder="Select class" />
             </SelectTrigger>
@@ -153,13 +153,14 @@ export function AdjustBuilder({
             value={sectionId}
             onValueChange={(v) => setSectionId(v ?? "")}
             disabled={!classId}
+            items={classSections.map(s => ({ value: s.id, label: `Section ${s.name}` }))}
           >
             <SelectTrigger className="w-44">
               <SelectValue placeholder={classId ? "Select section" : "Class first"} />
             </SelectTrigger>
             <SelectContent>
               {classSections.map((s) => (
-                <SelectItem key={s.id} value={s.id}>Section {s.name}</SelectItem>
+                <SelectItem key={s.id} value={s.id} label={`Section ${s.name}`}>Section {s.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -245,6 +246,7 @@ export function AdjustBuilder({
                                     : id ?? null,
                               }));
                             }}
+                            items={[{ value: "none", label: "— No change —" }, ...teachers.map(t => ({ value: t.id, label: `${t.short_name} (${t.teacher_code})` }))]}
                           >
                             <SelectTrigger>
                               <SelectValue placeholder="No change" />
@@ -252,7 +254,11 @@ export function AdjustBuilder({
                             <SelectContent>
                               <SelectItem value="none">— No change —</SelectItem>
                               {teachers.map((t) => (
-                                <SelectItem key={t.id} value={t.id}>
+                                <SelectItem
+                                  key={t.id}
+                                  value={t.id}
+                                  label={`${t.short_name} (${t.teacher_code})`}
+                                >
                                   {t.short_name} ({t.teacher_code})
                                 </SelectItem>
                               ))}

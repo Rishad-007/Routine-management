@@ -52,6 +52,7 @@ export function RoutineViewer({
                 setClassId(v ?? "");
                 setSectionId("");
               }}
+              items={classes.map(c => ({ value: c.id, label: c.name }))}
             >
               <SelectTrigger className="w-48">
                 <SelectValue placeholder="Select class" />
@@ -69,13 +70,14 @@ export function RoutineViewer({
               value={sectionId}
               onValueChange={(v) => setSectionId(v ?? "")}
               disabled={!classId}
+              items={classSections.map(s => ({ value: s.id, label: `Section ${s.name}` }))}
             >
               <SelectTrigger className="w-48">
                 <SelectValue placeholder={classId ? "Select section" : "Choose class first"} />
               </SelectTrigger>
               <SelectContent>
                 {classSections.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>Section {s.name}</SelectItem>
+                  <SelectItem key={s.id} value={s.id} label={`Section ${s.name}`}>Section {s.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

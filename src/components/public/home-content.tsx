@@ -103,7 +103,7 @@ export function HomeContent({
             <CardTitle className="text-base">View a class routine</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Select value={classId} onValueChange={(v) => { setClassId(v ?? ""); setSectionId(""); }}>
+            <Select value={classId} onValueChange={(v) => { setClassId(v ?? ""); setSectionId(""); }} items={classes.map(c => ({ value: c.id, label: c.name }))}>
               <SelectTrigger>
                 <SelectValue placeholder="Select class" />
               </SelectTrigger>
@@ -113,7 +113,7 @@ export function HomeContent({
                 ))}
               </SelectContent>
             </Select>
-            <Select value={sectionId} onValueChange={(v) => setSectionId(v ?? "")} disabled={!classId}>
+            <Select value={sectionId} onValueChange={(v) => setSectionId(v ?? "")} disabled={!classId} items={classSections.map(s => ({ value: s.id, label: `Section ${s.name}` }))}>
               <SelectTrigger>
                 <SelectValue placeholder={classId ? "Select section" : "Choose a class first"} />
               </SelectTrigger>

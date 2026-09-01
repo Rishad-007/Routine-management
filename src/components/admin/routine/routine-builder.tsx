@@ -310,7 +310,7 @@ export function RoutineBuilder({
       <div className="flex flex-wrap items-end gap-4 rounded-xl border bg-white p-4 shadow-sm">
         <div className="space-y-1">
           <p className="text-xs font-medium text-slate-500">Class</p>
-          <Select value={classId} onValueChange={handleSelectClass}>
+          <Select value={classId} onValueChange={handleSelectClass} items={classes.map(c => ({ value: c.id, label: c.name }))}>
             <SelectTrigger className="w-44">
               <SelectValue placeholder="Select class" />
             </SelectTrigger>
@@ -327,13 +327,14 @@ export function RoutineBuilder({
             value={sectionId}
             onValueChange={(v) => loadSection(v ?? "")}
             disabled={!classId}
+            items={classSections.map(s => ({ value: s.id, label: `Section ${s.name}` }))}
           >
             <SelectTrigger className="w-44">
               <SelectValue placeholder={classId ? "Select section" : "Class first"} />
             </SelectTrigger>
             <SelectContent>
               {classSections.map((s) => (
-                <SelectItem key={s.id} value={s.id}>Section {s.name}</SelectItem>
+                <SelectItem key={s.id} value={s.id} label={`Section ${s.name}`}>Section {s.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -471,6 +472,7 @@ export function RoutineBuilder({
                           subjectId: v === "none" ? null : (v ?? null),
                         })
                       }
+                      items={[{ value: "none", label: "— None —" }, ...subjects.map(s => ({ value: s.id, label: s.name }))]}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select subject" />
@@ -493,6 +495,7 @@ export function RoutineBuilder({
                           teacherId: v === "none" ? null : (v ?? null),
                         })
                       }
+                      items={[{ value: "none", label: "— None —" }, ...teachersForSubject(selectedCell?.subjectId ?? null).map(t => ({ value: t.id, label: t.is_open_teacher ? `${t.short_name} (open)` : t.short_name }))]}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Assign teacher" />
@@ -500,7 +503,11 @@ export function RoutineBuilder({
                       <SelectContent>
                         <SelectItem value="none">— None —</SelectItem>
                         {teachersForSubject(selectedCell?.subjectId ?? null).map((t) => (
-                          <SelectItem key={t.id} value={t.id}>
+                          <SelectItem
+                            key={t.id}
+                            value={t.id}
+                            label={t.is_open_teacher ? `${t.short_name} (open)` : t.short_name}
+                          >
                             {t.short_name}
                             {t.is_open_teacher ? " (open)" : ""}
                           </SelectItem>
@@ -518,6 +525,7 @@ export function RoutineBuilder({
                           roomId: v === "none" ? null : (v ?? null),
                         })
                       }
+                      items={[{ value: "none", label: "— None —" }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Assign room" />

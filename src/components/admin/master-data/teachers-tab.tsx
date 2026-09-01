@@ -235,6 +235,7 @@ export function TeachersTab({ teachers, subjects, teacherSubjects }: Props) {
               <Select
                 value={form.primarySubjectId}
                 onValueChange={(v) => setForm({ ...form, primarySubjectId: v ?? "" })}
+                items={subjects.map(s => ({ value: s.id, label: s.name }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Optional" />

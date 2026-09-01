@@ -102,7 +102,7 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
               <Label className="text-xs">Class</Label>
-              <Select value={classId} onValueChange={(v) => setClassId(v ?? "")}>
+              <Select value={classId} onValueChange={(v) => setClassId(v ?? "")} items={classes.map(c => ({ value: c.id, label: c.name }))}>
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="Select class" />
                 </SelectTrigger>
@@ -119,7 +119,7 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Room (optional)</Label>
-              <Select value={roomId} onValueChange={(v) => setRoomId(v ?? "")}>
+              <Select value={roomId} onValueChange={(v) => setRoomId(v ?? "")} items={rooms.map(r => ({ value: r.id, label: r.name }))}>
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
@@ -145,7 +145,7 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
             <div key={s.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
               {editing?.id === s.id ? (
                 <div className="flex flex-1 flex-wrap items-end gap-2">
-                  <Select value={editClass} onValueChange={(v) => setEditClass(v ?? "")}>
+                  <Select value={editClass} onValueChange={(v) => setEditClass(v ?? "")} items={classes.map(c => ({ value: c.id, label: c.name }))}>
                     <SelectTrigger className="w-40">
                       <SelectValue>{classMap[editClass]}</SelectValue>
                     </SelectTrigger>
@@ -156,7 +156,7 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
                     </SelectContent>
                   </Select>
                   <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-24" />
-                  <Select value={editRoom} onValueChange={(v) => setEditRoom(v ?? "")}>
+                  <Select value={editRoom} onValueChange={(v) => setEditRoom(v ?? "")} items={[{ value: "none", label: "None" }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}>
                     <SelectTrigger className="w-40">
                       <SelectValue>{editRoom ? roomMap[editRoom] : "None"}</SelectValue>
                     </SelectTrigger>
