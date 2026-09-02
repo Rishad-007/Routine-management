@@ -34,6 +34,7 @@ import {
   Save,
   GripVertical,
   Users,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -190,12 +191,14 @@ export function RoutineBuilder({
       if (r.is_tag) {
         const primary = m[r.day][r.period_number];
         if (primary) {
+          primary.isTag = true;
           primary.subjectId2 = r.subject_id;
           primary.teacherId2 = r.teacher_id;
           primary.roomId2 = r.room_id;
         } else {
           m[r.day][r.period_number] = {
             ...emptyCell(),
+            isTag: true,
             subjectId2: r.subject_id,
             teacherId2: r.teacher_id,
             roomId2: r.room_id,
@@ -208,7 +211,7 @@ export function RoutineBuilder({
           teacherId: r.teacher_id,
           roomId: r.room_id,
           isAdjusted: r.is_adjusted,
-          isTag: existing?.teacherId2 !== null,
+          isTag: existing ? existing.subjectId2 !== null : false,
           subjectId2: existing?.subjectId2 ?? null,
           teacherId2: existing?.teacherId2 ?? null,
           roomId2: existing?.roomId2 ?? null,
@@ -393,7 +396,11 @@ export function RoutineBuilder({
               <span className="text-xs text-amber-600">Unsaved changes</span>
             )}
             <Button onClick={() => handleSave()} disabled={saving || !dirty}>
-              <Save className="mr-1.5 h-4 w-4" />
+              {saving ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-1.5 h-4 w-4" />
+              )}
               {saving ? "Saving…" : "Save routine"}
             </Button>
           </div>

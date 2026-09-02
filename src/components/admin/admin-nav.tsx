@@ -8,6 +8,7 @@ import {
   Database,
   CalendarRange,
   SlidersHorizontal,
+  Globe,
   LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,12 @@ const NAV_ITEMS = [
   { href: "/admin/master-data", label: "Update Database", icon: Database },
   { href: "/admin/routine", label: "Update Routine", icon: CalendarRange },
   { href: "/admin/adjust", label: "Adjust Routine", icon: SlidersHorizontal },
+];
+
+const VIEW_ITEMS = [
+  { href: "/routine", label: "Class Routine", icon: Globe },
+  { href: "/teacher", label: "Teacher Routine", icon: Globe },
+  { href: "/teachers", label: "Teachers", icon: Globe },
 ];
 
 export function AdminNav() {
@@ -60,6 +67,19 @@ export function AdminNav() {
               </Link>
             );
           })}
+          <span className="mx-2 h-5 w-px bg-slate-200" />
+          {VIEW_ITEMS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-teal-700 transition-colors hover:bg-teal-50"
+            >
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </Link>
+          ))}
         </nav>
 
         <form action={logoutAction}>
@@ -96,6 +116,18 @@ export function AdminNav() {
             </Link>
           );
         })}
+        {VIEW_ITEMS.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium bg-teal-50 text-teal-700"
+          >
+            <item.icon className="h-4 w-4" />
+            {item.label}
+          </Link>
+        ))}
       </nav>
     </header>
   );

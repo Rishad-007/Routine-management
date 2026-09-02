@@ -1,6 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "src/app/api/routine.pdf/route.tsx": { "runtime": "nodejs22.x" }
+    "src/app/api/routine.pdf/route.tsx": { "runtime": "nodejs22.x" },
+    "src/app/api/teacher-routine.pdf/route.tsx": { "runtime": "nodejs22.x" },
+    "src/app/api/adjust-report.pdf/route.tsx": { "runtime": "nodejs22.x" }
   }
 }

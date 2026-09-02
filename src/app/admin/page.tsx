@@ -24,6 +24,7 @@ import {
   SlidersHorizontal,
   Database,
   ArrowRight,
+  Globe,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,12 @@ export default async function AdminDashboardPage() {
     { href: "/admin/master-data", label: "Update Database", desc: "Classes, sections, subjects, teachers & rooms", icon: Database },
     { href: "/admin/routine", label: "Update Routine", desc: "Build a section's full weekly routine", icon: CalendarRange },
     { href: "/admin/adjust", label: "Adjust Routine", desc: "Temporary date-scoped teacher substitutions", icon: SlidersHorizontal },
+  ];
+
+  const viewLinks = [
+    { href: "/routine", label: "Class Routine", desc: "View weekly routine like the public", icon: Globe },
+    { href: "/teacher", label: "Teacher Routine", desc: "View any teacher's routine like the public", icon: Globe },
+    { href: "/teachers", label: "Teachers", desc: "Browse the teacher directory", icon: Globe },
   ];
 
   return (
@@ -113,6 +120,31 @@ export default async function AdminDashboardPage() {
                   <q.icon className="h-5 w-5 text-[#1e3a5f]" />
                 </div>
                 <p className="flex items-center gap-1 font-semibold text-[#1e3a5f]">
+                  {q.label}
+                  <ArrowRight className="h-4 w-4 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+                </p>
+                <p className="mt-1 text-sm text-slate-500">{q.desc}</p>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-[#1e3a5f]">
+          View Routine (as the public sees it)
+        </h2>
+        <span className="text-xs text-slate-400">Opens in a new tab</span>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        {viewLinks.map((q) => (
+          <Link key={q.href} href={q.href} target="_blank" rel="noreferrer" className="group">
+            <Card className="h-full border-[#0d9488]/20 transition-all hover:border-[#0d9488]/60 hover:shadow-md">
+              <CardContent className="p-5">
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-[#0d9488]/10">
+                  <q.icon className="h-5 w-5 text-[#0d9488]" />
+                </div>
+                <p className="flex items-center gap-1 font-semibold text-[#0d9488]">
                   {q.label}
                   <ArrowRight className="h-4 w-4 text-slate-400 transition-transform group-hover:translate-x-0.5" />
                 </p>

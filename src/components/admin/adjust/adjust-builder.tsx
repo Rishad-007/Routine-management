@@ -37,6 +37,8 @@ import {
   RotateCcw,
   Users,
   BookOpen,
+  FileText,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -133,6 +135,7 @@ export function AdjustBuilder({
   const [teacherSearch, setTeacherSearch] = useState("");
   const [sheetSearch, setSheetSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
   const [pendingRed, setPendingRed] = useState<{
     adjustment: PeriodAdjustment;
     reasons: string[];
@@ -250,7 +253,6 @@ export function AdjustBuilder({
     date,
     overrides,
     tagOverrides,
-    teachers,
   ]);
 
   const filteredTeachers = useMemo(() => {
@@ -502,6 +504,13 @@ export function AdjustBuilder({
     Object.keys(overrides).length > 0 ||
     Object.keys(tagOverrides).length > 0;
 
+  const downloadReport = () => {
+    if (!date || dayIndex === null) return;
+    setReportLoading(true);
+    window.open(`/api/adjust-report.pdf?date=${date}`, "_blank", "noopener");
+    setTimeout(() => setReportLoading(false), 2500);
+  };
+
   const currentSheetCell = sheetPeriod
     ? dayCells.find((c) => c.period === sheetPeriod)
     : null;
@@ -533,6 +542,30 @@ export function AdjustBuilder({
             </span>
           </div>
         )}
+        <div className="ml-auto flex items-center gap-3 rounded-lg border border-[#0d9488]/20 bg-teal-50/50 px-3 py-2">
+          <div className="pr-1">
+            <p className="text-xs font-semibold text-[#0d9488]">
+              Daily Adjustment Report
+            </p>
+            <p className="text-[11px] text-slate-500">
+              Whole-school PDF for {date || "—"}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={downloadReport}
+            disabled={reportLoading || dayIndex === null}
+            className="border-[#0d9488] text-[#0d9488] hover:bg-[#0d9488] hover:text-white"
+          >
+            {reportLoading ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileText className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {reportLoading ? "Preparing…" : "Download PDF"}
+          </Button>
+        </div>
       </div>
 
       {isNoSchool ? (
@@ -622,7 +655,11 @@ export function AdjustBuilder({
                         disabled={saving}
                         className="bg-[#0d9488] text-white hover:bg-[#0b7a70]"
                       >
-                        <Save className="mr-1 h-3.5 w-3.5" />
+                        {saving ? (
+                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Save className="mr-1 h-3.5 w-3.5" />
+                        )}
                         {saving ? "Saving…" : "Save changes"}
                       </Button>
                     </div>

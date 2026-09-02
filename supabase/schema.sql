@@ -146,6 +146,9 @@ create index idx_teacher_subjects_subject on teacher_subjects(subject_id);
 -- =============================================
 create function purge_expired_adjustments() returns trigger as $$
 begin
+  if pg_trigger_depth() > 1 then
+    return coalesce(new, old);
+  end if;
   delete from adjustments where adjust_date < CURRENT_DATE;
   return coalesce(new, old);
 end $$ language plpgsql;

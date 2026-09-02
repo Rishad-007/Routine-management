@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Download } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { FadeIn } from "@/components/motion/fade-in";
 import {
   Select,
@@ -36,8 +36,15 @@ export function RoutineViewer({
       ""
   );
   const [sectionId, setSectionId] = useState<string>(initialSectionId ?? "");
+  const [pdfLoading, setPdfLoading] = useState(false);
   const classSections = sections.filter((s) => s.class_id === classId);
   const matrix = sectionId ? matrices[sectionId] : undefined;
+
+  const downloadPdf = () => {
+    setPdfLoading(true);
+    window.open(`/api/routine.pdf?section=${sectionId}`, "_blank", "noopener");
+    setTimeout(() => setPdfLoading(false), 2500);
+  };
 
   return (
     <FadeIn>
@@ -92,14 +99,18 @@ export function RoutineViewer({
               {classes.find((c) => c.id === classId)?.name} — Section{" "}
               {sections.find((s) => s.id === sectionId)?.name}
             </CardTitle>
-            <a
-              href={`/api/routine.pdf?section=${sectionId}`}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1.5 rounded-lg bg-[#0d9488] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0b7a70]"
+            <button
+              onClick={downloadPdf}
+              disabled={pdfLoading}
+              className="flex items-center gap-1.5 rounded-lg bg-[#0d9488] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0b7a70] disabled:opacity-70"
             >
-              <Download className="h-4 w-4" /> PDF
-            </a>
+              {pdfLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}{" "}
+              {pdfLoading ? "Preparing PDF…" : "PDF"}
+            </button>
           </CardHeader>
           <CardContent className="pt-0">
             <RoutineGrid matrix={matrix} season={season} />
