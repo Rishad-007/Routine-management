@@ -1,5 +1,5 @@
 import "server-only";
-import { createAdminClient } from "./supabase/admin";
+import { createClient } from "./supabase/server";
 import {
   type ClassRow,
   type SectionRow,
@@ -12,14 +12,14 @@ import {
   type SettingsRow,
 } from "./types";
 
-function db() {
-  return createAdminClient();
+async function db() {
+  return createClient();
 }
 
 // ---------------- Master data reads (admin client = bypass RLS on server) ----------------
 
 export async function getClasses(): Promise<ClassRow[]> {
-  const { data, error } = await db()
+  const { data, error } = await (await db())
     .from("classes")
     .select("*")
     .order("sort_order", { ascending: true });
@@ -28,25 +28,25 @@ export async function getClasses(): Promise<ClassRow[]> {
 }
 
 export async function getSections(): Promise<SectionRow[]> {
-  const { data, error } = await db().from("sections").select("*");
+  const { data, error } = await (await db()).from("sections").select("*");
   if (error) throw new Error(error.message);
   return (data as SectionRow[]) ?? [];
 }
 
 export async function getRooms(): Promise<RoomRow[]> {
-  const { data, error } = await db().from("rooms").select("*").order("name");
+  const { data, error } = await (await db()).from("rooms").select("*").order("name");
   if (error) throw new Error(error.message);
   return (data as RoomRow[]) ?? [];
 }
 
 export async function getSubjects(): Promise<SubjectRow[]> {
-  const { data, error } = await db().from("subjects").select("*").order("name");
+  const { data, error } = await (await db()).from("subjects").select("*").order("name");
   if (error) throw new Error(error.message);
   return (data as SubjectRow[]) ?? [];
 }
 
 export async function getTeachers(): Promise<TeacherRow[]> {
-  const { data, error } = await db()
+  const { data, error } = await (await db())
     .from("teachers")
     .select("*")
     .order("full_name");
@@ -55,13 +55,13 @@ export async function getTeachers(): Promise<TeacherRow[]> {
 }
 
 export async function getTeacherSubjects(): Promise<TeacherSubjectRow[]> {
-  const { data, error } = await db().from("teacher_subjects").select("*");
+  const { data, error } = await (await db()).from("teacher_subjects").select("*");
   if (error) throw new Error(error.message);
   return (data as TeacherSubjectRow[]) ?? [];
 }
 
 export async function getRoutines(sectionId?: string): Promise<RoutineRow[]> {
-  let q = db().from("routines").select("*");
+  let q = (await db()).from("routines").select("*");
   if (sectionId) q = q.eq("section_id", sectionId);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
@@ -70,7 +70,7 @@ export async function getRoutines(sectionId?: string): Promise<RoutineRow[]> {
 
 export async function getAdjustments(): Promise<AdjustmentRow[]> {
   const today = new Date().toISOString().slice(0, 10);
-  const { data, error } = await db()
+  const { data, error } = await (await db())
     .from("adjustments")
     .select("*")
     .gte("adjust_date", today);
@@ -79,13 +79,13 @@ export async function getAdjustments(): Promise<AdjustmentRow[]> {
 }
 
 export async function getSettings(): Promise<SettingsRow[]> {
-  const { data, error } = await db().from("settings").select("*");
+  const { data, error } = await (await db()).from("settings").select("*");
   if (error) throw new Error(error.message);
   return (data as SettingsRow[]) ?? [];
 }
 
 export async function getSetting(key: string): Promise<string | null> {
-  const { data, error } = await db()
+  const { data, error } = await (await db())
     .from("settings")
     .select("value")
     .eq("key", key)
