@@ -10,6 +10,10 @@
 -- ---------- DROP EXISTING (FK-safe order) ----------
 drop trigger if exists trg_purge_expired_adjustments on adjustments;
 drop function if exists purge_expired_adjustments();
+drop trigger if exists trg_validate_routine_slot on routines;
+drop function if exists validate_routine_slot();
+drop trigger if exists trg_validate_adjustment_slot on adjustments;
+drop function if exists validate_adjustment_slot();
 drop table if exists settings cascade;
 drop table if exists adjustments cascade;
 drop table if exists routines cascade;
@@ -140,6 +144,15 @@ create index idx_adjustments_tag on adjustments(is_tag);
 create index idx_teacher_subjects_subject on teacher_subjects(subject_id);
 
 -- =============================================
+-- Hard guarantee: a teacher can NEVER be assigned
+-- to the same day+period in two sections.
+-- (NULL teacher = empty cell → ignored.)
+-- =============================================
+create unique index uk_routines_teacher_slot
+  on routines(day, period_number, teacher_id)
+  where teacher_id is not null;
+
+-- =============================================
 -- Auto-delete expired adjustments trigger
 -- Purges any adjustment whose adjust_date < today
 -- whenever any write occurs on the adjustments table.
@@ -156,6 +169,144 @@ end $$ language plpgsql;
 create trigger trg_purge_expired_adjustments
 after insert or update or delete or truncate on adjustments
 for each statement execute function purge_expired_adjustments();
+
+-- =============================================
+-- Routine slot validator: block a teacher from
+-- being assigned to the same day+period in two
+-- different sections (and also within the same
+-- section — a cell can only have ONE primary row,
+-- a secondary/tag teacher is stored in is_tag rows
+-- which must belong to a DIFFERENT teacher).
+-- =============================================
+create function validate_routine_slot() returns trigger as $$
+declare
+  conflict record;
+  primary_key text := '';
+begin
+  -- Only validate rows carrying a teacher.
+  if new.teacher_id is null then
+    return coalesce(new, old);
+  end if;
+
+  if tg_op = 'UPDATE' then
+    primary_key := ' and r.id <> ' || quote_literal(old.id);
+  end if;
+
+  -- 1) Same teacher, same day+period, any other row.
+  --    This covers both cross-section and primary-vs-secondary within a section.
+  execute format(
+    'select r.id, r.section_id, r.is_tag from routines r
+       where r.teacher_id = %L
+         and r.day = %L
+         and r.period_number = %L %s
+       limit 1',
+    new.teacher_id, new.day, new.period_number, primary_key
+  ) into conflict;
+
+  if found then
+    raise exception
+      'Teacher % is already assigned to another class at this day (%L) and period (%L).',
+      new.teacher_id, new.day, new.period_number;
+  end if;
+
+  -- 2) A section cell may only have ONE primary (is_tag=false) row.
+  --    Tag (secondary) rows are exempt — they legitimately coexist with a
+  --    primary row in the same cell.
+  if not new.is_tag then
+    execute format(
+      'select id from routines r
+         where r.section_id = %L
+           and r.day = %L
+           and r.period_number = %L
+           and r.is_tag = false %s
+         limit 1',
+      new.section_id, new.day, new.period_number, primary_key
+    ) into conflict;
+
+    if found then
+      raise exception
+        'Section % already has a primary class at day %L, period %L.',
+        new.section_id, new.day, new.period_number;
+    end if;
+  end if;
+
+  return coalesce(new, old);
+end $$ language plpgsql;
+
+drop trigger if exists trg_validate_routine_slot on routines;
+create trigger trg_validate_routine_slot
+before insert or update on routines
+for each row execute function validate_routine_slot();
+
+-- =============================================
+-- Adjustment substitute validator: a substitute
+-- teacher can NOT already be teaching in the base
+-- routine (or another adjustment) at the same
+-- day+period on the chosen date.
+-- =============================================
+create function validate_adjustment_slot() returns trigger as $$
+declare
+  slot_day int;
+  conflict record;
+  old_key text := '';
+begin
+  if new.new_teacher_id is null then
+    return new;
+  end if;
+
+  -- Achieve the school day for the adjustment date (0=Sun .. 4=Thu).
+  slot_day := extract(dow from new.adjust_date::date);
+  if slot_day = 5 or slot_day = 6 then          -- Fri / Sat → no school
+    raise exception 'Cannot adjust on a non-school day.';
+  end if;
+
+  if tg_op = 'UPDATE' then
+    old_key := ' and r.id <> ' || quote_literal(old.id);
+  end if;
+
+  -- 1) Substitute must be free in the base routine at that day+period,
+  --    EXCLUDING the section currently being substituted (so replacing
+  --    the current teacher is allowed).
+  execute format(
+    'select r.id from routines r
+       where r.teacher_id = %L
+         and r.day = %L
+         and r.period_number = %L
+         and r.section_id <> %L %s
+       limit 1',
+    new.new_teacher_id, slot_day, new.period_number, new.section_id, old_key
+  ) into conflict;
+
+  if found then
+    raise exception
+      'Substitute teacher % is already teaching another class at this day and period %L.',
+      new.new_teacher_id, new.period_number;
+  end if;
+
+  -- 2) Substitute must not already be assigned as another adjustment's
+  --    substitute for the same date+period.
+  execute format(
+    'select a.id from adjustments a
+       where a.adjust_date = %L
+         and a.new_teacher_id = %L
+         and a.period_number = %L %s
+       limit 1',
+    new.adjust_date, new.new_teacher_id, new.period_number, old_key
+  ) into conflict;
+
+  if found then
+    raise exception
+      'Substitute teacher % is already assigned to another class on this date at period %L.',
+      new.new_teacher_id, new.period_number;
+  end if;
+
+  return new;
+end $$ language plpgsql;
+
+drop trigger if exists trg_validate_adjustment_slot on adjustments;
+create trigger trg_validate_adjustment_slot
+before insert or update on adjustments
+for each row execute function validate_adjustment_slot();
 
 -- =============================================
 -- Row Level Security

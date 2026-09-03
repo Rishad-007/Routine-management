@@ -19,6 +19,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { CurrentPeriodCard } from "./current-period-card";
 import { FadeIn } from "@/components/motion/fade-in";
 import { useCurrentPeriod } from "@/hooks/use-current-period";
+import { getTodayLocal } from "@/lib/periods";
 import type { Season } from "@/lib/constants";
 import type {
   ClassRow,
@@ -74,7 +75,7 @@ export function HomeContent({
     );
     if (!r) return undefined;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayLocal();
     const adj = adjustments.find(
       (a) =>
         a.adjust_date === today &&

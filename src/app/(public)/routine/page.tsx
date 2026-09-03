@@ -9,6 +9,7 @@ import {
   getAdjustments,
 } from "@/lib/data";
 import { buildSectionMatrix, buildTodayOverrides } from "@/lib/routine-view";
+import { getTodayLocal } from "@/lib/periods";
 import type { Season } from "@/lib/constants";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
 import { RoutineViewer } from "@/components/public/routine-viewer";
@@ -33,7 +34,7 @@ export default async function RoutinePage({
       getAdjustments(),
     ]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayLocal();
   const todayPrimaryOverrides = buildTodayOverrides(adjustments, today, false);
   const todayTagOverrides = buildTodayOverrides(adjustments, today, true);
 

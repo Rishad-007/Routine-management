@@ -9,6 +9,7 @@ import {
 } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT } from "@/lib/constants";
+import { getTodayLocal } from "@/lib/periods";
 import type {
   SectionRow,
   RoutineRow,
@@ -108,7 +109,7 @@ async function getSectionRoutine(sectionId: string) {
       admin.from("subjects").select("*"),
       admin.from("rooms").select("*"),
       admin.from("classes").select("*"),
-      admin.from("adjustments").select("*").eq("adjust_date", new Date().toISOString().slice(0, 10)),
+      admin.from("adjustments").select("*").eq("adjust_date", getTodayLocal()),
     ]);
 
   const section = secRes.data as SectionRow | null;

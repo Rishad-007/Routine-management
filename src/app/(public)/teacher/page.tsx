@@ -7,6 +7,7 @@ import {
   getAdjustments,
 } from "@/lib/data";
 import { buildTeacherMatrix, buildTodayOverrides } from "@/lib/routine-view";
+import { getTodayLocal } from "@/lib/periods";
 import type { Season } from "@/lib/constants";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
 import { TeacherRoutineViewer } from "@/components/public/teacher-routine-viewer";
@@ -28,7 +29,7 @@ export default async function TeacherPage({
     getAdjustments(),
   ]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayLocal();
   const todayPrimaryOverrides = buildTodayOverrides(adjustments, today, false);
   const todayTagOverrides = buildTodayOverrides(adjustments, today, true);
 

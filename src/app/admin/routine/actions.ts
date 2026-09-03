@@ -117,6 +117,21 @@ export async function saveSectionRoutine(
     return true;
   });
 
+  // HARD BLOCK — a teacher can NEVER be double-booked (same day+period in
+  // two sections), regardless of force. Overload (load-based) warnings are
+  // still force-approvable, but same-period double-booking is not.
+  const busyWarnings = uniqueWarnings.filter((w) => w.type === "busy");
+  if (busyWarnings.length > 0) {
+    return {
+      error:
+        "Cannot save: " +
+        busyWarnings
+          .map((w) => `${w.teacherName} — ${w.detail}`)
+          .join("; ") +
+        ". Free the teacher in that period first.",
+    };
+  }
+
   if (uniqueWarnings.length > 0 && !force) {
     return { warnings: uniqueWarnings };
   }

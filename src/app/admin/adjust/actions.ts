@@ -97,6 +97,25 @@ export async function saveAllAdjustments(
 
   const routines = (allRoutines ?? []) as RoutineRow[];
 
+  // HARD BLOCK — a substitute can NEVER be double-booked at the same
+  // day+period in another section, regardless of the force flag.
+  for (const c of changes) {
+    if (!c.newTeacherId) continue;
+    const busy = routines.some(
+      (r) =>
+        r.day === dayIndex &&
+        r.period_number === c.period &&
+        r.teacher_id === c.newTeacherId &&
+        r.section_id !== c.sectionId
+    );
+    if (busy) {
+      return {
+        error:
+          "A substitute already teaches another class at this period. Free that teacher first.",
+      };
+    }
+  }
+
   // Server-side validation of each adjustment.
   const warnings: { period: number; sectionId: string; level: "yellow" | "red"; reasons: string[] }[] = [];
 
@@ -161,5 +180,8 @@ export async function saveAllAdjustments(
   }
 
   revalidatePath("/admin/adjust");
+  revalidatePath("/");
+  revalidatePath("/routine");
+  revalidatePath("/teacher");
   return { success: true, savedCount };
 }

@@ -330,6 +330,15 @@ export function AdjustBuilder({
       cell.sectionId
     );
 
+    // HARD BLOCK: the substitute is already teaching another class at this
+    // day+period. This is a double-booking and cannot be force-approved.
+    if (isTeacherBusy(routines, newTeacherId, dayIndex!, period)) {
+      toast.error(
+        "This teacher already has a class in another section at this period. Free them first before assigning."
+      );
+      return;
+    }
+
     if (sim.level === "red") {
       setPendingRed({
         adjustment: {

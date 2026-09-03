@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  DAY_LABEL_LIST,
-  SCHOOL_NAME_DEFAULT,
-  type Season,
-} from "@/lib/constants";
+import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT, type Season } from "@/lib/constants";
+import { getTodayLocal } from "@/lib/periods";
 import { buildTeacherMatrix, buildTodayOverrides } from "@/lib/routine-view";
 import type {
   SectionRow,
@@ -97,7 +94,7 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayLocal();
 
   const [teaRes, clsRes, secRes, rotRes, adjRes, seasonRes] =
     await Promise.all([

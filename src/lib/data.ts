@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "./supabase/server";
+import { getTodayLocal } from "./periods";
 import {
   type ClassRow,
   type SectionRow,
@@ -34,13 +35,19 @@ export async function getSections(): Promise<SectionRow[]> {
 }
 
 export async function getRooms(): Promise<RoomRow[]> {
-  const { data, error } = await (await db()).from("rooms").select("*").order("name");
+  const { data, error } = await (await db())
+    .from("rooms")
+    .select("*")
+    .order("name");
   if (error) throw new Error(error.message);
   return (data as RoomRow[]) ?? [];
 }
 
 export async function getSubjects(): Promise<SubjectRow[]> {
-  const { data, error } = await (await db()).from("subjects").select("*").order("name");
+  const { data, error } = await (await db())
+    .from("subjects")
+    .select("*")
+    .order("name");
   if (error) throw new Error(error.message);
   return (data as SubjectRow[]) ?? [];
 }
@@ -55,7 +62,9 @@ export async function getTeachers(): Promise<TeacherRow[]> {
 }
 
 export async function getTeacherSubjects(): Promise<TeacherSubjectRow[]> {
-  const { data, error } = await (await db()).from("teacher_subjects").select("*");
+  const { data, error } = await (await db())
+    .from("teacher_subjects")
+    .select("*");
   if (error) throw new Error(error.message);
   return (data as TeacherSubjectRow[]) ?? [];
 }
@@ -69,7 +78,7 @@ export async function getRoutines(sectionId?: string): Promise<RoutineRow[]> {
 }
 
 export async function getAdjustments(): Promise<AdjustmentRow[]> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getTodayLocal();
   const { data, error } = await (await db())
     .from("adjustments")
     .select("*")

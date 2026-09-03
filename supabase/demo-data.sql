@@ -126,157 +126,147 @@ join subjects s
 -- =============================================================
 --  ROUTINES — FULL WEEK FOR EVERY SECTION (primary only)
 --  15 sections x 5 days x 7 periods = 525 primary cells
+--
+--  CONFLICT-FREE BY CONSTRUCTION:
+--  There are 21 teachers and 15 sections. At each (day, period)
+--  slot, each section is assigned a DISTINCT teacher using
+--    teacher_index = (seq + slot_index) % 21
+--  where seq = 0..14 (section order) and slot_index = day*7+(period-1).
+--  Because 15 < 21, no teacher is ever used twice in the same slot,
+--  so a teacher can never be double-booked. The subject is the
+--  assigned teacher's primary subject.
 -- =============================================================
 insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
 select
-  s.id,
+  sec.sid,
   d.day,
   p.period,
-  t.id,
+  tea.id,
   sub.id,
-  s.room_id,
+  sec.room_id,
   false
-from sections s
-join (
-  select row_number() over (order by c.sort_order, se.name) - 1 as seq, se.id as sid
+from (
+  select
+    row_number() over (order by c.sort_order, se.name) - 1 as seq,
+    se.id as sid,
+    se.room_id
   from sections se
   join classes c on c.id = se.class_id
-) sec on sec.sid = s.id
+) sec
 cross join generate_series(0,4) as d(day)
 cross join generate_series(1,7) as p(period)
 cross join lateral (
-  select (array['Bng','Math','Eng','Phy','Che','Bio','SSc','Isl','Cmp','PE'])
-         [ (p.period + d.day) % 10 + 1 ] as subject_short
-) subj
-join subjects sub on sub.short_name = subj.subject_short
-cross join lateral (
-  select case subj.subject_short
-    when 'Bng'  then (array['T01','T02','T03'])[ (sec.seq + d.day + p.period*2) % 3 + 1 ]
-    when 'Eng'  then (array['T04','T05','T06'])[ (sec.seq + d.day + p.period*2) % 3 + 1 ]
-    when 'Math' then (array['T07','T08','T09'])[ (sec.seq + d.day + p.period*2) % 3 + 1 ]
-    when 'Phy'  then (array['T10','T11'])[ (sec.seq + d.day + p.period*2) % 2 + 1 ]
-    when 'Che'  then (array['T12','T13'])[ (sec.seq + d.day + p.period*2) % 2 + 1 ]
-    when 'Bio'  then (array['T14','T15'])[ (sec.seq + d.day + p.period*2) % 2 + 1 ]
-    when 'SSc'  then (array['T16','T17'])[ (sec.seq + d.day + p.period*2) % 2 + 1 ]
-    when 'Isl'  then (array['T18','T19'])[ (sec.seq + d.day + p.period*2) % 2 + 1 ]
-    when 'Cmp'  then 'T20'
-    when 'PE'   then 'T21'
-  end as teacher_code
-) tc
-join teachers t on t.teacher_code = tc.teacher_code;
+  select (array_agg(id order by teacher_code))[( (sec.seq + (d.day * 7 + (p.period - 1))) % 21 ) + 1] as teacher_id
+  from teachers
+) tea
+join teachers sub_t on sub_t.id = tea.teacher_id
+join subjects sub on sub.id = sub_t.primary_subject_id;
 
 -- =============================================================
 --  TAG (2-TEACHER) ROUTINES
---  Adds a secondary (tag) teacher for select cells so you can
---  verify dual-teacher display, tag toggle, and tag overrides.
+--  A tag adds a SECOND teacher to one cell (distinct day+period
+--  slot per tag row). The tag teacher is chosen from the teachers
+--  NOT already giving a primary class in that slot, so the tag
+--  teacher is guaranteed free there. Kept to a single tag row per
+--  slot to keep the data clean and conflict-free.
 -- =============================================================
 
--- Tag A: Class 6-A, Sunday periods 1+3 — Physics + Bio practicals
+-- Tag: Class 6-A, Sunday period 1 (Physics practical, co-taught)
 insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select s.id, 0, 1, t.id, sub.id, (select id from rooms where name='Science Lab'), true
-from sections s
-join classes c on c.id = s.class_id
-join teachers t on t.teacher_code = 'T11'
-join subjects sub on sub.short_name = 'Phy'
-where c.name = 'Class 6' and s.name = 'A';
+select
+  sec.sid,
+  0,
+  1,
+  free_t.id,
+  free_sub.id,
+  (select id from rooms where name='Science Lab'),
+  true
+from (
+  select se.id as sid
+  from sections se
+  join classes c on c.id = se.class_id
+  where c.name = 'Class 6' and se.name = 'A'
+) sec
+cross join lateral (
+  -- teachers already teaching this slot (primaries)
+  select array_agg(r.teacher_id) as busy
+  from routines r
+  where r.day = 0 and r.period_number = 1 and r.is_tag = false
+) busy
+cross join lateral (
+  select t.id
+  from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
+  order by t.teacher_code
+  limit 1
+) free_t
+join subjects free_sub on free_sub.id = (
+  select primary_subject_id from teachers where id = free_t.id
+);
 
+-- Tag: Class 8-A, Tuesday period 3 (Chemistry practical, co-taught)
 insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select s.id, 0, 3, t.id, sub.id, (select id from rooms where name='Science Lab'), true
-from sections s
-join classes c on c.id = s.class_id
-join teachers t on t.teacher_code = 'T15'
-join subjects sub on sub.short_name = 'Bio'
-where c.name = 'Class 6' and s.name = 'A';
+select
+  sec.sid,
+  2,
+  3,
+  free_t.id,
+  free_sub.id,
+  (select id from rooms where name='Science Lab'),
+  true
+from (
+  select se.id as sid
+  from sections se
+  join classes c on c.id = se.class_id
+  where c.name = 'Class 8' and se.name = 'A'
+) sec
+cross join lateral (
+  select array_agg(r.teacher_id) as busy
+  from routines r
+  where r.day = 2 and r.period_number = 3 and r.is_tag = false
+) busy
+cross join lateral (
+  select t.id
+  from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
+  order by t.teacher_code
+  limit 1
+) free_t
+join subjects free_sub on free_sub.id = (
+  select primary_subject_id from teachers where id = free_t.id
+);
 
--- Tag B: Class 8-A, Monday periods 3+4 — Chemistry practical + Math
+-- Tag: Class 9-A, Sunday period 5 (Computer Studies, co-taught)
 insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select s.id, 1, 3, t.id, sub.id, (select id from rooms where name='Science Lab'), true
-from sections s
-join classes c on c.id = s.class_id
-join teachers t on t.teacher_code = 'T13'
-join subjects sub on sub.short_name = 'Che'
-where c.name = 'Class 8' and s.name = 'A';
-
-insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select s.id, 1, 4, t.id, sub.id, (select id from rooms where name='Room 102'), true
-from sections s
-join classes c on c.id = s.class_id
-join teachers t on t.teacher_code = 'T09'
-join subjects sub on sub.short_name = 'Math'
-where c.name = 'Class 8' and s.name = 'A';
-
--- Tag C: Class 9-A, Sunday periods 2+5 — English speaking + Computer
-insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select s.id, 0, 2, t.id, sub.id, (select id from rooms where name='Room 104'), true
-from sections s
-join classes c on c.id = s.class_id
-join teachers t on t.teacher_code = 'T06'
-join subjects sub on sub.short_name = 'Eng'
-where c.name = 'Class 9' and s.name = 'A';
-
-insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select s.id, 0, 5, t.id, sub.id, (select id from rooms where name='Computer Lab'), true
-from sections s
-join classes c on c.id = s.class_id
-join teachers t on t.teacher_code = 'T20'
-join subjects sub on sub.short_name = 'Cmp'
-where c.name = 'Class 9' and s.name = 'A';
-
--- Tag D: Class 10-B, Tuesday periods 1+2 — PE + Isl
-insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select s.id, 2, 1, t.id, sub.id, (select id from rooms where name='Multi-Purpose Hall'), true
-from sections s
-join classes c on c.id = s.class_id
-join teachers t on t.teacher_code = 'T21'
-join subjects sub on sub.short_name = 'PE'
-where c.name = 'Class 10' and s.name = 'B';
-
-insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select s.id, 2, 2, t.id, sub.id, (select id from rooms where name='Room 108'), true
-from sections s
-join classes c on c.id = s.class_id
-join teachers t on t.teacher_code = 'T18'
-join subjects sub on sub.short_name = 'Isl'
-where c.name = 'Class 10' and s.name = 'B';
-
--- =============================================================
---  CONFLICT SCENARIOS FOR TESTING
--- =============================================================
-
--- Scenario A: RED — 4 consecutive periods (Mr. Karim, 8-A, Mon)
-update routines r set teacher_id = t.id, subject_id = s.id
-from teachers t, subjects s, sections sec, classes c
-where t.teacher_code='T01' and s.short_name='Bng'
-  and sec.name='A' and c.name='Class 8' and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=1 and r.period_number in (1,2,3,4) and r.is_tag=false;
-
--- Scenario B: RED — 6 periods in one day (Mr. Anwar, 9-B, Tue)
-update routines r set teacher_id = t.id, subject_id = s.id
-from teachers t, subjects s, sections sec, classes c
-where t.teacher_code='T09' and s.short_name='Math'
-  and sec.name='B' and c.name='Class 9' and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=2 and r.period_number in (1,2,4,5,6,7) and r.is_tag=false;
-
--- Scenario C: RED — double-booked (Ms. Christina, 7-A & 7-B, Wed period 3)
-update routines r set teacher_id = t.id, subject_id = s.id
-from teachers t, subjects s, sections sec, classes c
-where t.teacher_code='T06' and s.short_name='Eng'
-  and c.name in ('Class 7') and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=2 and r.period_number=3 and r.is_tag=false;
-
--- Scenario D: YELLOW — 3 consecutive (Mr. William, 6-A, Sun periods 1-3)
-update routines r set teacher_id = t.id, subject_id = s.id
-from teachers t, subjects s, sections sec, classes c
-where t.teacher_code='T04' and s.short_name='Eng'
-  and sec.name='A' and c.name='Class 6' and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=0 and r.period_number in (1,2,3) and r.is_tag=false;
-
--- Scenario E: YELLOW — 5 periods in one day (Mrs. Shahana, 10-C, Thu)
-update routines r set teacher_id = t.id, subject_id = s.id
-from teachers t, subjects s, sections sec, classes c
-where t.teacher_code='T08' and s.short_name='Math'
-  and sec.name='C' and c.name='Class 10' and sec.class_id=c.id and r.section_id=sec.id
-  and r.day=4 and r.period_number in (1,2,4,5,6) and r.is_tag=false;
+select
+  sec.sid,
+  0,
+  5,
+  free_t.id,
+  free_sub.id,
+  (select id from rooms where name='Computer Lab'),
+  true
+from (
+  select se.id as sid
+  from sections se
+  join classes c on c.id = se.class_id
+  where c.name = 'Class 9' and se.name = 'A'
+) sec
+cross join lateral (
+  select array_agg(r.teacher_id) as busy
+  from routines r
+  where r.day = 0 and r.period_number = 5 and r.is_tag = false
+) busy
+cross join lateral (
+  select t.id
+  from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
+  order by t.teacher_code
+  limit 1
+) free_t
+join subjects free_sub on free_sub.id = (
+  select primary_subject_id from teachers where id = free_t.id
+);
 
 -- =============================================================
 --  ADJUSTMENTS
@@ -285,68 +275,186 @@ where t.teacher_code='T08' and s.short_name='Math'
 -- =============================================================
 
 -- Past adjustment (will be auto-deleted by trigger on next write)
+-- Substitute picked dynamically: a teacher NOT already teaching at day 1
+-- (Monday) period 3. Guaranteed conflict-free.
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, reason)
 select '2026-09-01',
        sec.id,
        3,
-       (select id from teachers where teacher_code='T01'),
-       (select id from teachers where teacher_code='T02'),
+       orig.id,
+       free_t.id,
        'Teacher on sick leave'
-from sections sec join classes c on c.id = sec.class_id
-where c.name = 'Class 8' and sec.name = 'A';
+from (
+  select se.id
+  from sections se
+  join classes c on c.id = se.class_id
+  where c.name = 'Class 8' and se.name = 'A'
+) sec
+join routines orig_r on orig_r.section_id = sec.id and orig_r.day = 1 and orig_r.period_number = 3 and orig_r.is_tag = false
+join teachers orig on orig.id = orig_r.teacher_id
+cross join lateral (
+  select array_agg(r.teacher_id) as busy
+  from routines r
+  where r.day = 1 and r.period_number = 3 and r.is_tag = false
+    and r.section_id <> sec.id
+) busy
+cross join lateral (
+  select t.id
+  from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
+    and t.id <> orig.id
+  order by t.teacher_code
+  limit 1
+) free_t;
 
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, reason)
 select '2026-09-01',
        sec.id,
        6,
-       (select id from teachers where teacher_code='T16'),
-       (select id from teachers where teacher_code='T17'),
+       orig.id,
+       free_t.id,
        'Training duty'
-from sections sec join classes c on c.id = sec.class_id
-where c.name = 'Class 9' and sec.name = 'C';
+from (
+  select se.id
+  from sections se
+  join classes c on c.id = se.class_id
+  where c.name = 'Class 9' and se.name = 'C'
+) sec
+join routines orig_r on orig_r.section_id = sec.id and orig_r.day = 1 and orig_r.period_number = 6 and orig_r.is_tag = false
+join teachers orig on orig.id = orig_r.teacher_id
+cross join lateral (
+  select array_agg(r.teacher_id) as busy
+  from routines r
+  where r.day = 1 and r.period_number = 6 and r.is_tag = false
+    and r.section_id <> sec.id
+) busy
+cross join lateral (
+  select t.id
+  from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
+    and t.id <> orig.id
+  order by t.teacher_code
+  limit 1
+) free_t;
 
--- TODAY adjustment — Primary: 6-A period 2 (Mr. William -> Mrs. Fatema)
+-- TODAY adjustment — Primary: 6-A period 2 (original teacher -> a free substitute)
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
 select CURRENT_DATE,
        sec.id,
        2,
-       (select id from teachers where teacher_code='T04'),
-       (select id from teachers where teacher_code='T02'),
-       (select id from subjects where short_name='Eng'),
-       (select id from subjects where short_name='Bng'),
+       orig.id,
+       free_t.id,
+       orig_sub.id,
+       free_sub.id,
        (select id from rooms where name='Room 101'),
        'Covering class — teacher absent'
-from sections sec join classes c on c.id = sec.class_id
-where c.name = 'Class 6' and sec.name = 'A';
+from (
+  select se.id
+  from sections se
+  join classes c on c.id = se.class_id
+  where c.name = 'Class 6' and se.name = 'A'
+) sec
+join routines orig_r on orig_r.section_id = sec.id and orig_r.day = extract(dow from CURRENT_DATE::date) and orig_r.period_number = 2 and orig_r.is_tag = false
+join teachers orig on orig.id = orig_r.teacher_id
+join subjects orig_sub on orig_sub.id = orig_r.subject_id
+cross join lateral (
+  select array_agg(r.teacher_id) as busy
+  from routines r
+  where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 2 and r.is_tag = false
+    and r.section_id <> sec.id
+) busy
+cross join lateral (
+  select t.id
+  from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
+    and t.id <> orig.id
+  order by t.teacher_code
+  limit 1
+) free_t
+join subjects free_sub on free_sub.id = (
+  select primary_subject_id from teachers where id = free_t.id
+)
+where extract(dow from CURRENT_DATE::date) between 0 and 4;
 
--- TODAY adjustment — Primary: 8-A period 1 (Mr. Karim -> Mr. Monir)
+-- TODAY adjustment — Primary: 8-A period 1 (original teacher -> a free substitute)
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
 select CURRENT_DATE,
        sec.id,
        1,
-       (select id from teachers where teacher_code='T01'),
-       (select id from teachers where teacher_code='T07'),
-       (select id from subjects where short_name='Bng'),
-       (select id from subjects where short_name='Math'),
+       orig.id,
+       free_t.id,
+       orig_sub.id,
+       free_sub.id,
        (select id from rooms where name='Room 102'),
        'Emergency leave cover'
-from sections sec join classes c on c.id = sec.class_id
-where c.name = 'Class 8' and sec.name = 'A';
+from (
+  select se.id
+  from sections se
+  join classes c on c.id = se.class_id
+  where c.name = 'Class 8' and se.name = 'A'
+) sec
+join routines orig_r on orig_r.section_id = sec.id and orig_r.day = extract(dow from CURRENT_DATE::date) and orig_r.period_number = 1 and orig_r.is_tag = false
+join teachers orig on orig.id = orig_r.teacher_id
+join subjects orig_sub on orig_sub.id = orig_r.subject_id
+cross join lateral (
+  select array_agg(r.teacher_id) as busy
+  from routines r
+  where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 1 and r.is_tag = false
+    and r.section_id <> sec.id
+) busy
+cross join lateral (
+  select t.id
+  from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
+    and t.id <> orig.id
+  order by t.teacher_code
+  limit 1
+) free_t
+join subjects free_sub on free_sub.id = (
+  select primary_subject_id from teachers where id = free_t.id
+)
+where extract(dow from CURRENT_DATE::date) between 0 and 4;
 
--- TODAY adjustment — Tag: 6-A period 3 (Mr. Mahmud -> Dr. Amina, Bio -> Phy)
+-- TODAY adjustment — Tag: 6-A period 3 (tag teacher swap to a free teacher)
 insert into adjustments (adjust_date, section_id, period_number, is_tag, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
 select CURRENT_DATE,
        sec.id,
        3,
        true,
-       (select id from teachers where teacher_code='T15'),
-       (select id from teachers where teacher_code='T10'),
-       (select id from subjects where short_name='Bio'),
-       (select id from subjects where short_name='Phy'),
+       orig.id,
+       free_t.id,
+       orig_sub.id,
+       (select primary_subject_id from teachers where id = free_t.id),
        (select id from rooms where name='Science Lab'),
        'Tag teacher swap'
-from sections sec join classes c on c.id = sec.class_id
-where c.name = 'Class 6' and sec.name = 'A';
+from (
+  select se.id
+  from sections se
+  join classes c on c.id = se.class_id
+  where c.name = 'Class 6' and se.name = 'A'
+) sec
+join routines orig_r on orig_r.section_id = sec.id and orig_r.day = extract(dow from CURRENT_DATE::date) and orig_r.period_number = 3 and orig_r.is_tag = false
+join teachers orig on orig.id = orig_r.teacher_id
+join subjects orig_sub on orig_sub.id = orig_r.subject_id
+cross join lateral (
+  select array_agg(t.id) as busy
+  from (
+    select r.teacher_id as id from routines r
+      where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 3 and r.section_id <> sec.id and r.teacher_id is not null
+    union
+    select r.teacher_id from routines r
+      where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 3 and r.section_id = sec.id and r.is_tag = false and r.teacher_id is not null
+  ) t
+) busy
+cross join lateral (
+  select t.id
+  from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
+    and t.id <> orig.id
+  order by t.teacher_code
+  limit 1
+) free_t
+where extract(dow from CURRENT_DATE::date) between 0 and 4;
 
 -- =============================================================
 --  SUMMARY

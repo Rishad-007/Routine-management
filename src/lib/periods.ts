@@ -147,4 +147,19 @@ export function getSchoolDayIndex(date: Date): number | null {
   return jsDay; // Sun..Thu already 0..4
 }
 
+/**
+ * Today's date as YYYY-MM-DD in the LOCAL timezone.
+ * IMPORTANT: use this (not `new Date().toISOString()`, which is UTC) so the
+ * server and the adjust page agree on which calendar day is "today". A UTC
+ * "today" can drift from local "today" between midnight and the UTC offset,
+ * which is why adjustments sometimes didn't appear in the main routine.
+ */
+export function getTodayLocal(reference?: Date): string {
+  const d = reference ?? new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export type { TimeBlock };
