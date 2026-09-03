@@ -118,10 +118,10 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
               <Input placeholder="e.g. A" value={name} onChange={(e) => setName(e.target.value)} className="w-28" />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Room (optional)</Label>
+              <Label className="text-xs">Room (required)</Label>
               <Select value={roomId} onValueChange={(v) => setRoomId(v ?? "")} items={rooms.map(r => ({ value: r.id, label: r.name }))}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="None" />
+                  <SelectValue placeholder="Select room" />
                 </SelectTrigger>
                 <SelectContent>
                   {rooms.map((r) => (
@@ -134,7 +134,7 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
               <input type="checkbox" checked={fixed} onChange={(e) => setFixed(e.target.checked)} />
               Fixed room
             </label>
-            <Button onClick={handleCreate} disabled={pending} className="bg-[#0d9488] hover:bg-[#0b7a70]">
+            <Button onClick={handleCreate} disabled={pending || !classId || !name.trim() || !roomId} className="bg-[#0d9488] hover:bg-[#0b7a70]">
               <Plus className="h-4 w-4" /> Add
             </Button>
           </div>
@@ -156,12 +156,11 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
                     </SelectContent>
                   </Select>
                   <Input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-24" />
-                  <Select value={editRoom} onValueChange={(v) => setEditRoom(v ?? "")} items={[{ value: "none", label: "None" }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}>
+                  <Select value={editRoom} onValueChange={(v) => setEditRoom(v ?? "")} items={rooms.map(r => ({ value: r.id, label: r.name }))}>
                     <SelectTrigger className="w-40">
-                      <SelectValue>{editRoom ? roomMap[editRoom] : "None"}</SelectValue>
+                      <SelectValue>{editRoom ? roomMap[editRoom] : "Select room"}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
                       {rooms.map((r) => (
                         <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
                       ))}
@@ -171,7 +170,7 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
                     <input type="checkbox" checked={editFixed} onChange={(e) => setEditFixed(e.target.checked)} />
                     Fixed
                   </label>
-                  <Button size="sm" onClick={handleUpdate} disabled={pending}>
+                  <Button size="sm" onClick={handleUpdate} disabled={pending || !editClass || !editName.trim() || !editRoom}>
                     <Check className="h-4 w-4" />
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>

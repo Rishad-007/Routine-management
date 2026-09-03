@@ -14,6 +14,8 @@ drop trigger if exists trg_validate_routine_slot on routines;
 drop function if exists validate_routine_slot();
 drop trigger if exists trg_validate_adjustment_slot on adjustments;
 drop function if exists validate_adjustment_slot();
+drop trigger if exists trg_sync_section_room on sections;
+drop function if exists sync_section_room();
 drop table if exists settings cascade;
 drop table if exists adjustments cascade;
 drop table if exists routines cascade;
@@ -52,11 +54,13 @@ create table rooms (
 );
 
 -- ---------- SECTIONS ----------
+-- Each section has a mandatory fixed room. Routines auto-fill this room
+-- (see trg_sync_section_room) but individual cells may override it.
 create table sections (
   id uuid primary key default gen_random_uuid(),
   class_id uuid not null references classes(id) on delete cascade,
   name text not null,
-  room_id uuid references rooms(id) on delete set null,
+  room_id uuid not null references rooms(id) on delete restrict,
   fixed_room boolean not null default true
 );
 
@@ -237,6 +241,28 @@ drop trigger if exists trg_validate_routine_slot on routines;
 create trigger trg_validate_routine_slot
 before insert or update on routines
 for each row execute function validate_routine_slot();
+
+-- =============================================
+-- Section fixed-room sync: when a section's room is edited and the
+-- section is "fixed", propagate the new room to that section's routine
+-- rows — but only for cells that still use the section's previous room
+-- (so per-cell overrides like labs / computer rooms are preserved).
+-- =============================================
+create function sync_section_room() returns trigger as $$
+begin
+  if new.fixed_room and new.room_id is distinct from old.room_id then
+    update routines
+       set room_id = new.room_id
+     where section_id = new.id
+       and room_id is not distinct from old.room_id;
+  end if;
+  return new;
+end $$ language plpgsql;
+
+drop trigger if exists trg_sync_section_room on sections;
+create trigger trg_sync_section_room
+after update on sections
+for each row execute function sync_section_room();
 
 -- =============================================
 -- Adjustment substitute validator: a substitute

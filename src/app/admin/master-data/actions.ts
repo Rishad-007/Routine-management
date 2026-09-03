@@ -56,6 +56,7 @@ export async function createSection(
   const { admin } = await authed();
   const trimmed = name.trim();
   if (!classId || !trimmed) return { error: "Class and section name are required." };
+  if (!roomId) return { error: "A fixed room is required for every section." };
   const { error } = await admin
     .from("sections")
     .insert({ class_id: classId, name: trimmed, room_id: roomId, fixed_room: fixedRoom });
@@ -74,6 +75,7 @@ export async function updateSection(
   const { admin } = await authed();
   const trimmed = name.trim();
   if (!classId || !trimmed) return { error: "Class and section name are required." };
+  if (!roomId) return { error: "A fixed room is required for every section." };
   const { error } = await admin
     .from("sections")
     .update({ class_id: classId, name: trimmed, room_id: roomId, fixed_room: fixedRoom })

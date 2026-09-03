@@ -1,5 +1,5 @@
 -- ============================================================
--- School Routine Management App — LARGE DEMO DATA GENERATOR
+-- School Routine Management App — RICH DEMO DATA GENERATOR
 -- Cantonment Public School & College, Rangpur
 --
 --  RUN THIS AFTER schema.sql (in Supabase SQL Editor).
@@ -7,10 +7,13 @@
 --     replaces them with a large, self-consistent demo dataset.
 --
 --  What you get:
---    • 5 classes, 21 teachers, 10 subjects, 24 rooms, 15 sections
---    • 15 sections x 5 days x 7 periods = 525 primary routine cells
+--    • 5 classes, 30 teachers, 10 subjects, 26 rooms, 20 sections
+--    • 20 sections x 5 days x 7 periods = 700 primary routine cells
+--    • Conflict-free: no teacher is double-booked in any (day, period)
+--    • Varied daily loads on purpose (some 3/day, many 4-5/day, some 6/day)
+--      so the Adjust page shows rich stats: teachers who are free/open,
+--      who already have 4-5 classes today, and who have 3+ continuous.
 --    • Tag (2-teacher) rows on select cells for testing dual-teacher display
---    • Conflict scenarios (4-consecutive, 3-consecutive, 6/day, double-booked)
 --    • Date-scoped adjustments including TODAY for adjust page testing
 -- ============================================================
 
@@ -41,11 +44,13 @@ insert into classes (name, sort_order) values
   ('Class 10', 5);
 
 -- ---------- ROOMS ----------
+-- 22 classroom rooms (one fixed room per section) + 4 specialty rooms.
 insert into rooms (name) values
   ('Room 101'), ('Room 102'), ('Room 103'), ('Room 104'), ('Room 105'),
   ('Room 106'), ('Room 107'), ('Room 108'), ('Room 109'), ('Room 110'),
   ('Room 201'), ('Room 202'), ('Room 203'), ('Room 204'), ('Room 205'),
   ('Room 206'), ('Room 207'), ('Room 208'), ('Room 209'), ('Room 210'),
+  ('Room 301'), ('Room 302'),
   ('Science Lab'), ('Computer Lab'), ('Library'), ('Multi-Purpose Hall');
 
 -- ---------- SUBJECTS ----------
@@ -83,38 +88,63 @@ insert into teachers (teacher_code, full_name, short_name, is_open_teacher, prim
   ('T18', 'Iqbal Hossain',          'Mr. Iqbal',  false, (select id from subjects where short_name='Isl')),
   ('T19', 'Farhana Akter',          'Ms. Farhana',false, (select id from subjects where short_name='Isl')),
   ('T20', 'Sabbir Ahmed',           'Mr. Sabbir',  true, (select id from subjects where short_name='Cmp')),
-  ('T21', 'Rubina Begum',           'Mrs. Rubina', true, (select id from subjects where short_name='PE'));
+  ('T21', 'Rubina Begum',           'Mrs. Rubina', true, (select id from subjects where short_name='PE')),
+  ('T22', 'Roksana Begum',          'Mrs. Roksana',false,(select id from subjects where short_name='Bng')),
+  ('T23', 'Imran Hossain',          'Mr. Imran',  false, (select id from subjects where short_name='Eng')),
+  ('T24', 'Dr. Nusrat Jahan',       'Dr. Nusrat', false, (select id from subjects where short_name='Math')),
+  ('T25', 'Tanvir Ahmed',           'Mr. Tanvir', false, (select id from subjects where short_name='Phy')),
+  ('T26', 'Jahanara Khatun',        'Mrs. Jahan', false, (select id from subjects where short_name='Che')),
+  ('T27', 'Aslam Hossain',          'Mr. Aslam',  false, (select id from subjects where short_name='Bio')),
+  ('T28', 'Shirin Akter',           'Mrs. Shirin',false, (select id from subjects where short_name='SSc')),
+  ('T29', 'Anisur Rahman',          'Mr. Anisur', false, (select id from subjects where short_name='Isl')),
+  ('T30', 'Nipu Akter',             'Ms. Nipu',   false, (select id from subjects where short_name='Eng'));
 
--- ---------- SECTIONS (3 per class = 15) ----------
-with sec_list as (
-  select c.id as class_id, sec.class_name, sec.name,
-         row_number() over (order by sec.class_name, sec.name) - 1 as rn
-  from (values
-    ('Class 6',  'A'), ('Class 6',  'B'), ('Class 6',  'C'),
-    ('Class 7',  'A'), ('Class 7',  'B'), ('Class 7',  'C'),
-    ('Class 8',  'A'), ('Class 8',  'B'), ('Class 8',  'C'),
-    ('Class 9',  'A'), ('Class 9',  'B'), ('Class 9',  'C'),
-    ('Class 10', 'A'), ('Class 10', 'B'), ('Class 10', 'C')
-  ) as sec(class_name, name)
-  join classes c on c.name = sec.class_name
-),
-srooms as (
-  select id, row_number() over (order by name) - 1 as rn from rooms
-)
+-- ---------- SECTIONS (4 per class = 20) with MANDATORY fixed rooms ----------
 insert into sections (class_id, name, room_id, fixed_room)
-select sl.class_id, sl.name, r.id, true
-from sec_list sl
-join srooms r on r.rn = sl.rn % 10;
+select c.id, s.name, r.id, true
+from (values
+  ('Class 6',  'A'), ('Class 6',  'B'), ('Class 6',  'C'), ('Class 6',  'D'),
+  ('Class 7',  'A'), ('Class 7',  'B'), ('Class 7',  'C'), ('Class 7',  'D'),
+  ('Class 8',  'A'), ('Class 8',  'B'), ('Class 8',  'C'), ('Class 8',  'D'),
+  ('Class 9',  'A'), ('Class 9',  'B'), ('Class 9',  'C'), ('Class 9',  'D'),
+  ('Class 10', 'A'), ('Class 10', 'B'), ('Class 10', 'C'), ('Class 10', 'D')
+) as s(class_name, name)
+join classes c on c.name = s.class_name
+join rooms r on r.name = case
+  -- give each section a distinct fixed classroom
+  when s.class_name = 'Class 6' and s.name = 'A' then 'Room 101'
+  when s.class_name = 'Class 6' and s.name = 'B' then 'Room 102'
+  when s.class_name = 'Class 6' and s.name = 'C' then 'Room 103'
+  when s.class_name = 'Class 6' and s.name = 'D' then 'Room 104'
+  when s.class_name = 'Class 7' and s.name = 'A' then 'Room 105'
+  when s.class_name = 'Class 7' and s.name = 'B' then 'Room 106'
+  when s.class_name = 'Class 7' and s.name = 'C' then 'Room 107'
+  when s.class_name = 'Class 7' and s.name = 'D' then 'Room 108'
+  when s.class_name = 'Class 8' and s.name = 'A' then 'Room 109'
+  when s.class_name = 'Class 8' and s.name = 'B' then 'Room 110'
+  when s.class_name = 'Class 8' and s.name = 'C' then 'Room 201'
+  when s.class_name = 'Class 8' and s.name = 'D' then 'Room 202'
+  when s.class_name = 'Class 9' and s.name = 'A' then 'Room 203'
+  when s.class_name = 'Class 9' and s.name = 'B' then 'Room 204'
+  when s.class_name = 'Class 9' and s.name = 'C' then 'Room 205'
+  when s.class_name = 'Class 9' and s.name = 'D' then 'Room 206'
+  when s.class_name = 'Class 10' and s.name = 'A' then 'Room 207'
+  when s.class_name = 'Class 10' and s.name = 'B' then 'Room 208'
+  when s.class_name = 'Class 10' and s.name = 'C' then 'Room 209'
+  when s.class_name = 'Class 10' and s.name = 'D' then 'Room 210'
+end;
 
--- ---------- TEACHER_SUBJECTS (many-to-many) ----------
+-- ---------- TEACHER_SUBJECTS (many-to-many: primary + companion subjects) ----------
 insert into teacher_subjects (teacher_id, subject_id)
 select t.id, s.id
 from teachers t
 join subjects s
   on s.id = t.primary_subject_id
   or (t.primary_subject_id = (select id from subjects where short_name='Bng') and s.id = (select id from subjects where short_name='SSc'))
+  or (t.primary_subject_id = (select id from subjects where short_name='Bng') and s.id = (select id from subjects where short_name='Isl'))
   or (t.primary_subject_id = (select id from subjects where short_name='Eng') and s.id = (select id from subjects where short_name='SSc'))
   or (t.primary_subject_id = (select id from subjects where short_name='Math') and s.id = (select id from subjects where short_name='Phy'))
+  or (t.primary_subject_id = (select id from subjects where short_name='Phy') and s.id = (select id from subjects where short_name='Math'))
   or (t.primary_subject_id = (select id from subjects where short_name='Phy') and s.id = (select id from subjects where short_name='Che'))
   or (t.primary_subject_id = (select id from subjects where short_name='Che') and s.id = (select id from subjects where short_name='Bio'))
   or (t.primary_subject_id = (select id from subjects where short_name='Bio') and s.id = (select id from subjects where short_name='SSc'))
@@ -124,336 +154,894 @@ join subjects s
   or (t.primary_subject_id = (select id from subjects where short_name='PE') and s.id = (select id from subjects where short_name='Bio'));
 
 -- =============================================================
---  ROUTINES — FULL WEEK FOR EVERY SECTION (primary only)
---  15 sections x 5 days x 7 periods = 525 primary cells
---
---  CONFLICT-FREE BY CONSTRUCTION:
---  There are 21 teachers and 15 sections. At each (day, period)
---  slot, each section is assigned a DISTINCT teacher using
---    teacher_index = (seq + slot_index) % 21
---  where seq = 0..14 (section order) and slot_index = day*7+(period-1).
---  Because 15 < 21, no teacher is ever used twice in the same slot,
---  so a teacher can never be double-booked. The subject is the
---  assigned teacher's primary subject.
+-- ROUTINES — FULL WEEK (primary) — generated conflict-free
+-- 20 sections x 5 days x 7 periods = 700 primary cells
 -- =============================================================
 insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select
-  sec.sid,
-  d.day,
-  p.period,
-  tea.id,
-  sub.id,
-  sec.room_id,
-  false
-from (
-  select
-    row_number() over (order by c.sort_order, se.name) - 1 as seq,
-    se.id as sid,
-    se.room_id
-  from sections se
-  join classes c on c.id = se.class_id
-) sec
-cross join generate_series(0,4) as d(day)
-cross join generate_series(1,7) as p(period)
-cross join lateral (
-  select (array_agg(id order by teacher_code))[( (sec.seq + (d.day * 7 + (p.period - 1))) % 21 ) + 1] as teacher_id
-  from teachers
-) tea
-join teachers sub_t on sub_t.id = tea.teacher_id
-join subjects sub on sub.id = sub_t.primary_subject_id;
-
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 0, 1, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 0, 1, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 0, 1, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 0, 1, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 0, 1, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 0, 1, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 0, 1, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 0, 1, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 0, 1, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 0, 1, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 0, 1, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 0, 1, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 0, 1, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 0, 1, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 0, 1, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 0, 1, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 0, 1, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 0, 1, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 0, 1, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 0, 1, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 0, 2, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 0, 2, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 0, 2, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 0, 2, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 0, 2, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 0, 2, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 0, 2, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 0, 2, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 0, 2, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 0, 2, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 0, 2, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 0, 2, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 0, 2, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 0, 2, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 0, 2, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 0, 2, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 0, 2, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 0, 2, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 0, 2, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 0, 2, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 0, 3, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 0, 3, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 0, 3, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 0, 3, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 0, 3, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 0, 3, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 0, 3, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 0, 3, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 0, 3, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 0, 3, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 0, 3, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 0, 3, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 0, 3, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 0, 3, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 0, 3, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 0, 3, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 0, 3, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 0, 3, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 0, 3, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 0, 3, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 0, 4, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 0, 4, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 0, 4, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 0, 4, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 0, 4, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 0, 4, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 0, 4, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 0, 4, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 0, 4, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 0, 4, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 0, 4, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 0, 4, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 0, 4, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 0, 4, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 0, 4, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 0, 4, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 0, 4, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 0, 4, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 0, 4, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 0, 4, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 0, 5, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 0, 5, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 0, 5, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 0, 5, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 0, 5, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 0, 5, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 0, 5, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 0, 5, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 0, 5, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 0, 5, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 0, 5, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 0, 5, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 0, 5, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 0, 5, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 0, 5, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 0, 5, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 0, 5, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 0, 5, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 0, 5, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 0, 5, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 0, 6, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 0, 6, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 0, 6, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 0, 6, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 0, 6, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 0, 6, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 0, 6, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 0, 6, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 0, 6, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 0, 6, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 0, 6, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 0, 6, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 0, 6, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 0, 6, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 0, 6, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 0, 6, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 0, 6, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 0, 6, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 0, 6, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 0, 6, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 0, 7, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 0, 7, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 0, 7, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 0, 7, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 0, 7, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 0, 7, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 0, 7, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 0, 7, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 0, 7, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 0, 7, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 0, 7, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 0, 7, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 0, 7, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 0, 7, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 0, 7, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 0, 7, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 0, 7, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 0, 7, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 0, 7, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 0, 7, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 1, 1, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 1, 1, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 1, 1, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 1, 1, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 1, 1, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 1, 1, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 1, 1, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 1, 1, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 1, 1, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 1, 1, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 1, 1, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 1, 1, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 1, 1, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 1, 1, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 1, 1, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 1, 1, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 1, 1, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 1, 1, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 1, 1, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 1, 1, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 1, 2, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 1, 2, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 1, 2, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 1, 2, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 1, 2, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 1, 2, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 1, 2, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 1, 2, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 1, 2, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 1, 2, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 1, 2, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 1, 2, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 1, 2, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 1, 2, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 1, 2, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 1, 2, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 1, 2, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 1, 2, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 1, 2, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 1, 2, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 1, 3, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 1, 3, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 1, 3, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 1, 3, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 1, 3, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 1, 3, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 1, 3, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 1, 3, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 1, 3, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 1, 3, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 1, 3, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 1, 3, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 1, 3, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 1, 3, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 1, 3, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 1, 3, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 1, 3, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 1, 3, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 1, 3, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 1, 3, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 1, 4, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 1, 4, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 1, 4, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 1, 4, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 1, 4, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 1, 4, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 1, 4, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 1, 4, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 1, 4, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 1, 4, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 1, 4, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 1, 4, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 1, 4, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 1, 4, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 1, 4, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 1, 4, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 1, 4, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 1, 4, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 1, 4, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 1, 4, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 1, 5, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 1, 5, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 1, 5, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 1, 5, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 1, 5, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 1, 5, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 1, 5, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 1, 5, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 1, 5, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 1, 5, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 1, 5, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 1, 5, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 1, 5, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 1, 5, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 1, 5, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 1, 5, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 1, 5, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 1, 5, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 1, 5, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 1, 5, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 1, 6, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 1, 6, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 1, 6, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 1, 6, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 1, 6, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 1, 6, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 1, 6, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 1, 6, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 1, 6, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 1, 6, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 1, 6, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 1, 6, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 1, 6, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 1, 6, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 1, 6, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 1, 6, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 1, 6, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 1, 6, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 1, 6, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 1, 6, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 1, 7, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 1, 7, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 1, 7, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 1, 7, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 1, 7, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 1, 7, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 1, 7, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 1, 7, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 1, 7, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 1, 7, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 1, 7, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 1, 7, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 1, 7, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 1, 7, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 1, 7, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 1, 7, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 1, 7, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 1, 7, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 1, 7, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 1, 7, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 2, 1, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 2, 1, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 2, 1, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 2, 1, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 2, 1, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 2, 1, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 2, 1, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 2, 1, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 2, 1, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 2, 1, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 2, 1, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 2, 1, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 2, 1, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 2, 1, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 2, 1, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 2, 1, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 2, 1, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 2, 1, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 2, 1, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 2, 1, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 2, 2, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 2, 2, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 2, 2, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 2, 2, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 2, 2, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 2, 2, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 2, 2, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 2, 2, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 2, 2, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 2, 2, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 2, 2, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 2, 2, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 2, 2, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 2, 2, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 2, 2, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 2, 2, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 2, 2, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 2, 2, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 2, 2, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 2, 2, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 2, 3, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 2, 3, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 2, 3, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 2, 3, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 2, 3, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 2, 3, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 2, 3, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 2, 3, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 2, 3, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 2, 3, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 2, 3, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 2, 3, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 2, 3, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 2, 3, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 2, 3, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 2, 3, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 2, 3, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 2, 3, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 2, 3, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 2, 3, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 2, 4, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 2, 4, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 2, 4, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 2, 4, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 2, 4, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 2, 4, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 2, 4, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 2, 4, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 2, 4, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 2, 4, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 2, 4, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 2, 4, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 2, 4, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 2, 4, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 2, 4, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 2, 4, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 2, 4, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 2, 4, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 2, 4, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 2, 4, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 2, 5, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 2, 5, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 2, 5, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 2, 5, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 2, 5, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 2, 5, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 2, 5, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 2, 5, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 2, 5, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 2, 5, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 2, 5, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 2, 5, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 2, 5, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 2, 5, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 2, 5, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 2, 5, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 2, 5, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 2, 5, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 2, 5, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 2, 5, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 2, 6, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 2, 6, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 2, 6, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 2, 6, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 2, 6, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 2, 6, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 2, 6, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 2, 6, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 2, 6, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 2, 6, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 2, 6, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 2, 6, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 2, 6, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 2, 6, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 2, 6, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 2, 6, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 2, 6, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 2, 6, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 2, 6, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 2, 6, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 2, 7, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 2, 7, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 2, 7, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 2, 7, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 2, 7, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 2, 7, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 2, 7, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 2, 7, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 2, 7, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 2, 7, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 2, 7, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 2, 7, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 2, 7, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 2, 7, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 2, 7, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 2, 7, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 2, 7, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 2, 7, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 2, 7, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 2, 7, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 3, 1, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 3, 1, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 3, 1, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 3, 1, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 3, 1, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 3, 1, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 3, 1, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 3, 1, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 3, 1, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 3, 1, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 3, 1, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 3, 1, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 3, 1, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 3, 1, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 3, 1, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 3, 1, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 3, 1, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 3, 1, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 3, 1, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 3, 1, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 3, 2, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 3, 2, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 3, 2, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 3, 2, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 3, 2, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 3, 2, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 3, 2, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 3, 2, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 3, 2, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 3, 2, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 3, 2, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 3, 2, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 3, 2, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 3, 2, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 3, 2, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 3, 2, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 3, 2, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 3, 2, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 3, 2, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 3, 2, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 3, 3, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 3, 3, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 3, 3, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 3, 3, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 3, 3, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 3, 3, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 3, 3, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 3, 3, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 3, 3, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 3, 3, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 3, 3, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 3, 3, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 3, 3, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 3, 3, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 3, 3, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 3, 3, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 3, 3, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 3, 3, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 3, 3, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 3, 3, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 3, 4, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 3, 4, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 3, 4, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 3, 4, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 3, 4, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 3, 4, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 3, 4, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 3, 4, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 3, 4, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 3, 4, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 3, 4, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 3, 4, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 3, 4, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 3, 4, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 3, 4, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 3, 4, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 3, 4, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 3, 4, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 3, 4, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 3, 4, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 3, 5, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 3, 5, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 3, 5, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 3, 5, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 3, 5, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 3, 5, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 3, 5, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 3, 5, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 3, 5, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 3, 5, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 3, 5, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 3, 5, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 3, 5, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 3, 5, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 3, 5, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 3, 5, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 3, 5, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 3, 5, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 3, 5, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 3, 5, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 3, 6, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 3, 6, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 3, 6, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 3, 6, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 3, 6, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 3, 6, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 3, 6, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 3, 6, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 3, 6, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 3, 6, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 3, 6, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 3, 6, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 3, 6, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 3, 6, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 3, 6, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 3, 6, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 3, 6, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 3, 6, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 3, 6, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 3, 6, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 3, 7, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 3, 7, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 3, 7, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 3, 7, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 3, 7, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 3, 7, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 3, 7, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 3, 7, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 3, 7, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 3, 7, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 3, 7, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 3, 7, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 3, 7, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 3, 7, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 3, 7, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 3, 7, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 3, 7, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 3, 7, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 3, 7, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 3, 7, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 4, 1, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 4, 1, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 4, 1, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 4, 1, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 4, 1, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 4, 1, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 4, 1, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 4, 1, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 4, 1, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 4, 1, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 4, 1, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 4, 1, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 4, 1, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 4, 1, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 4, 1, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 4, 1, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 4, 1, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 4, 1, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 4, 1, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 4, 1, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 4, 2, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 4, 2, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 4, 2, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 4, 2, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 4, 2, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 4, 2, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 4, 2, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 4, 2, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 4, 2, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 4, 2, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 4, 2, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 4, 2, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 4, 2, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 4, 2, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 4, 2, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 4, 2, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 4, 2, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 4, 2, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 4, 2, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 4, 2, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 4, 3, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 4, 3, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 4, 3, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 4, 3, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 4, 3, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 4, 3, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 4, 3, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 4, 3, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 4, 3, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 4, 3, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 4, 3, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 4, 3, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 4, 3, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 4, 3, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 4, 3, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 4, 3, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 4, 3, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 4, 3, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 4, 3, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 4, 3, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 4, 4, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 4, 4, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 4, 4, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 4, 4, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 4, 4, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 4, 4, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 4, 4, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 4, 4, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 4, 4, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 4, 4, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 4, 4, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 4, 4, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 4, 4, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 4, 4, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 4, 4, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 4, 4, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 4, 4, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 4, 4, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 4, 4, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 4, 4, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 4, 5, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 4, 5, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 4, 5, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 4, 5, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 4, 5, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 4, 5, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 4, 5, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 4, 5, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 4, 5, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 4, 5, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 4, 5, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 4, 5, (select id from teachers where teacher_code='T17'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 4, 5, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 4, 5, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 4, 5, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 4, 5, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 4, 5, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 4, 5, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 4, 5, (select id from teachers where teacher_code='T14'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 4, 5, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 4, 6, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 4, 6, (select id from teachers where teacher_code='T21'), (select id from subjects where short_name='PE'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 4, 6, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 4, 6, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 4, 6, (select id from teachers where teacher_code='T23'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 4, 6, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 4, 6, (select id from teachers where teacher_code='T24'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 4, 6, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 4, 6, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 4, 6, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 4, 6, (select id from teachers where teacher_code='T18'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 4, 6, (select id from teachers where teacher_code='T20'), (select id from subjects where short_name='Cmp'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 4, 6, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 4, 6, (select id from teachers where teacher_code='T19'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 4, 6, (select id from teachers where teacher_code='T16'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 4, 6, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 4, 6, (select id from teachers where teacher_code='T22'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 4, 6, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 4, 6, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 4, 6, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 210'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='A'), 4, 7, (select id from teachers where teacher_code='T06'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 101'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='B'), 4, 7, (select id from teachers where teacher_code='T09'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 102'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='C'), 4, 7, (select id from teachers where teacher_code='T08'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 103'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 6') and name='D'), 4, 7, (select id from teachers where teacher_code='T11'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 104'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='A'), 4, 7, (select id from teachers where teacher_code='T10'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 105'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='B'), 4, 7, (select id from teachers where teacher_code='T15'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 106'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='C'), 4, 7, (select id from teachers where teacher_code='T26'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 107'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 7') and name='D'), 4, 7, (select id from teachers where teacher_code='T07'), (select id from subjects where short_name='Math'), (select id from rooms where name='Room 108'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='A'), 4, 7, (select id from teachers where teacher_code='T29'), (select id from subjects where short_name='Isl'), (select id from rooms where name='Room 109'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='B'), 4, 7, (select id from teachers where teacher_code='T02'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 110'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='C'), 4, 7, (select id from teachers where teacher_code='T05'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 201'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 8') and name='D'), 4, 7, (select id from teachers where teacher_code='T28'), (select id from subjects where short_name='SSc'), (select id from rooms where name='Room 202'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='A'), 4, 7, (select id from teachers where teacher_code='T04'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 203'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='B'), 4, 7, (select id from teachers where teacher_code='T12'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 204'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='C'), 4, 7, (select id from teachers where teacher_code='T03'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 205'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 9') and name='D'), 4, 7, (select id from teachers where teacher_code='T25'), (select id from subjects where short_name='Phy'), (select id from rooms where name='Room 206'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='A'), 4, 7, (select id from teachers where teacher_code='T13'), (select id from subjects where short_name='Che'), (select id from rooms where name='Room 207'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='B'), 4, 7, (select id from teachers where teacher_code='T30'), (select id from subjects where short_name='Eng'), (select id from rooms where name='Room 208'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='C'), 4, 7, (select id from teachers where teacher_code='T27'), (select id from subjects where short_name='Bio'), (select id from rooms where name='Room 209'), false union all
+  select (select id from sections where class_id=(select id from classes where name='Class 10') and name='D'), 4, 7, (select id from teachers where teacher_code='T01'), (select id from subjects where short_name='Bng'), (select id from rooms where name='Room 210'), false;
 -- =============================================================
 --  TAG (2-TEACHER) ROUTINES
 --  A tag adds a SECOND teacher to one cell (distinct day+period
---  slot per tag row). The tag teacher is chosen from the teachers
---  NOT already giving a primary class in that slot, so the tag
---  teacher is guaranteed free there. Kept to a single tag row per
---  slot to keep the data clean and conflict-free.
+--  slot per tag row). The tag teacher is chosen dynamically from
+--  the teachers NOT already giving a class in that slot, so the
+--  tag teacher is guaranteed free there. Conflict-free by design.
 -- =============================================================
 
--- Tag: Class 6-A, Sunday period 1 (Physics practical, co-taught)
+-- Tag: Class 6-A, Sunday P1 (co-taught)
 insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select
-  sec.sid,
-  0,
-  1,
-  free_t.id,
-  free_sub.id,
-  (select id from rooms where name='Science Lab'),
-  true
+select sec.sid, 0, 1, free_t.id, free_sub.id,
+       (select id from rooms where name='Science Lab'), true
 from (
-  select se.id as sid
-  from sections se
+  select se.id as sid from sections se
   join classes c on c.id = se.class_id
   where c.name = 'Class 6' and se.name = 'A'
 ) sec
+cross join lateral (select array_agg(r.teacher_id) as busy
+  from routines r where r.day = 0 and r.period_number = 1 and r.is_tag = false) busy
 cross join lateral (
-  -- teachers already teaching this slot (primaries)
-  select array_agg(r.teacher_id) as busy
-  from routines r
-  where r.day = 0 and r.period_number = 1 and r.is_tag = false
-) busy
-cross join lateral (
-  select t.id
-  from teachers t
+  select t.id from teachers t
   where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
-  order by t.teacher_code
-  limit 1
+  order by t.teacher_code limit 1
 ) free_t
-join subjects free_sub on free_sub.id = (
-  select primary_subject_id from teachers where id = free_t.id
-);
+join subjects free_sub on free_sub.id = (select primary_subject_id from teachers where id = free_t.id);
 
--- Tag: Class 8-A, Tuesday period 3 (Chemistry practical, co-taught)
+-- Tag: Class 8-A, Tuesday P3 (co-taught)
 insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select
-  sec.sid,
-  2,
-  3,
-  free_t.id,
-  free_sub.id,
-  (select id from rooms where name='Science Lab'),
-  true
+select sec.sid, 2, 3, free_t.id, free_sub.id,
+       (select id from rooms where name='Science Lab'), true
 from (
-  select se.id as sid
-  from sections se
+  select se.id as sid from sections se
   join classes c on c.id = se.class_id
   where c.name = 'Class 8' and se.name = 'A'
 ) sec
+cross join lateral (select array_agg(r.teacher_id) as busy
+  from routines r where r.day = 2 and r.period_number = 3 and r.is_tag = false) busy
 cross join lateral (
-  select array_agg(r.teacher_id) as busy
-  from routines r
-  where r.day = 2 and r.period_number = 3 and r.is_tag = false
-) busy
-cross join lateral (
-  select t.id
-  from teachers t
+  select t.id from teachers t
   where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
-  order by t.teacher_code
-  limit 1
+  order by t.teacher_code limit 1
 ) free_t
-join subjects free_sub on free_sub.id = (
-  select primary_subject_id from teachers where id = free_t.id
-);
+join subjects free_sub on free_sub.id = (select primary_subject_id from teachers where id = free_t.id);
 
--- Tag: Class 9-A, Sunday period 5 (Computer Studies, co-taught)
+-- Tag: Class 9-C, Sunday P5 (co-taught, Computer)
 insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
-select
-  sec.sid,
-  0,
-  5,
-  free_t.id,
-  free_sub.id,
-  (select id from rooms where name='Computer Lab'),
-  true
+select sec.sid, 0, 5, free_t.id, free_sub.id,
+       (select id from rooms where name='Computer Lab'), true
 from (
-  select se.id as sid
-  from sections se
+  select se.id as sid from sections se
   join classes c on c.id = se.class_id
-  where c.name = 'Class 9' and se.name = 'A'
+  where c.name = 'Class 9' and se.name = 'C'
 ) sec
+cross join lateral (select array_agg(r.teacher_id) as busy
+  from routines r where r.day = 0 and r.period_number = 5 and r.is_tag = false) busy
 cross join lateral (
-  select array_agg(r.teacher_id) as busy
-  from routines r
-  where r.day = 0 and r.period_number = 5 and r.is_tag = false
-) busy
-cross join lateral (
-  select t.id
-  from teachers t
+  select t.id from teachers t
   where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
-  order by t.teacher_code
-  limit 1
+  order by t.teacher_code limit 1
 ) free_t
-join subjects free_sub on free_sub.id = (
-  select primary_subject_id from teachers where id = free_t.id
-);
+join subjects free_sub on free_sub.id = (select primary_subject_id from teachers where id = free_t.id);
+
+-- Tag: Class 10-B, Wednesday P4 (co-taught)
+insert into routines (section_id, day, period_number, teacher_id, subject_id, room_id, is_tag)
+select sec.sid, 3, 4, free_t.id, free_sub.id,
+       (select id from rooms where name='Library'), true
+from (
+  select se.id as sid from sections se
+  join classes c on c.id = se.class_id
+  where c.name = 'Class 10' and se.name = 'B'
+) sec
+cross join lateral (select array_agg(r.teacher_id) as busy
+  from routines r where r.day = 3 and r.period_number = 4 and r.is_tag = false) busy
+cross join lateral (
+  select t.id from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
+  order by t.teacher_code limit 1
+) free_t
+join subjects free_sub on free_sub.id = (select primary_subject_id from teachers where id = free_t.id);
 
 -- =============================================================
 --  ADJUSTMENTS
---  Primary adjustments for testing the Adjust page.
---  Includes a TODAY adjustment so you can see it live.
+--  Temporary, date-scoped changes for testing the Adjust page.
+--  Includes a TODAY adjustment (dynamic date) so you can see it live.
+--  Past adjustments are auto-deleted by the trigger on next write.
 -- =============================================================
 
--- Past adjustment (will be auto-deleted by trigger on next write)
--- Substitute picked dynamically: a teacher NOT already teaching at day 1
--- (Monday) period 3. Guaranteed conflict-free.
+-- Past adjustment (auto-purged): Class 8-A, Monday P3
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, reason)
-select '2026-09-01',
-       sec.id,
-       3,
-       orig.id,
-       free_t.id,
-       'Teacher on sick leave'
+select '2026-09-01', sec.id, 3, orig.id, free_t.id, 'Teacher on sick leave'
 from (
-  select se.id
-  from sections se
+  select se.id from sections se
   join classes c on c.id = se.class_id
   where c.name = 'Class 8' and se.name = 'A'
 ) sec
 join routines orig_r on orig_r.section_id = sec.id and orig_r.day = 1 and orig_r.period_number = 3 and orig_r.is_tag = false
 join teachers orig on orig.id = orig_r.teacher_id
+cross join lateral (select array_agg(r.teacher_id) as busy
+  from routines r where r.day = 1 and r.period_number = 3 and r.is_tag = false and r.section_id <> sec.id) busy
 cross join lateral (
-  select array_agg(r.teacher_id) as busy
-  from routines r
-  where r.day = 1 and r.period_number = 3 and r.is_tag = false
-    and r.section_id <> sec.id
-) busy
-cross join lateral (
-  select t.id
-  from teachers t
-  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
-    and t.id <> orig.id
-  order by t.teacher_code
-  limit 1
+  select t.id from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[])) and t.id <> orig.id
+  order by t.teacher_code limit 1
 ) free_t;
 
+-- Past adjustment (auto-purged): Class 9-C, Monday P6
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, reason)
-select '2026-09-01',
-       sec.id,
-       6,
-       orig.id,
-       free_t.id,
-       'Training duty'
+select '2026-09-01', sec.id, 6, orig.id, free_t.id, 'Training duty'
 from (
-  select se.id
-  from sections se
+  select se.id from sections se
   join classes c on c.id = se.class_id
   where c.name = 'Class 9' and se.name = 'C'
 ) sec
 join routines orig_r on orig_r.section_id = sec.id and orig_r.day = 1 and orig_r.period_number = 6 and orig_r.is_tag = false
 join teachers orig on orig.id = orig_r.teacher_id
+cross join lateral (select array_agg(r.teacher_id) as busy
+  from routines r where r.day = 1 and r.period_number = 6 and r.is_tag = false and r.section_id <> sec.id) busy
 cross join lateral (
-  select array_agg(r.teacher_id) as busy
-  from routines r
-  where r.day = 1 and r.period_number = 6 and r.is_tag = false
-    and r.section_id <> sec.id
-) busy
-cross join lateral (
-  select t.id
-  from teachers t
-  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
-    and t.id <> orig.id
-  order by t.teacher_code
-  limit 1
+  select t.id from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[])) and t.id <> orig.id
+  order by t.teacher_code limit 1
 ) free_t;
 
--- TODAY adjustment — Primary: 6-A period 2 (original teacher -> a free substitute)
+-- TODAY adjustment — Primary: Class 6-A P2 (only on school days)
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
-select CURRENT_DATE,
-       sec.id,
-       2,
-       orig.id,
-       free_t.id,
-       orig_sub.id,
-       free_sub.id,
-       (select id from rooms where name='Room 101'),
-       'Covering class — teacher absent'
+select CURRENT_DATE, sec.id, 2, orig.id, free_t.id, orig_sub.id, free_sub.id,
+       (select id from rooms where name='Room 103'), 'Covering class — teacher absent'
 from (
-  select se.id
-  from sections se
-  join classes c on c.id = se.class_id
+  select se.id from sections se join classes c on c.id = se.class_id
   where c.name = 'Class 6' and se.name = 'A'
 ) sec
 join routines orig_r on orig_r.section_id = sec.id and orig_r.day = extract(dow from CURRENT_DATE::date) and orig_r.period_number = 2 and orig_r.is_tag = false
 join teachers orig on orig.id = orig_r.teacher_id
 join subjects orig_sub on orig_sub.id = orig_r.subject_id
+cross join lateral (select array_agg(r.teacher_id) as busy
+  from routines r where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 2 and r.is_tag = false and r.section_id <> sec.id) busy
 cross join lateral (
-  select array_agg(r.teacher_id) as busy
-  from routines r
-  where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 2 and r.is_tag = false
-    and r.section_id <> sec.id
-) busy
-cross join lateral (
-  select t.id
-  from teachers t
-  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
-    and t.id <> orig.id
-  order by t.teacher_code
-  limit 1
+  select t.id from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[])) and t.id <> orig.id
+  order by t.teacher_code limit 1
 ) free_t
-join subjects free_sub on free_sub.id = (
-  select primary_subject_id from teachers where id = free_t.id
-)
+join subjects free_sub on free_sub.id = (select primary_subject_id from teachers where id = free_t.id)
 where extract(dow from CURRENT_DATE::date) between 0 and 4;
 
--- TODAY adjustment — Primary: 8-A period 1 (original teacher -> a free substitute)
+-- TODAY adjustment — Primary: Class 8-A P1 (only on school days)
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
-select CURRENT_DATE,
-       sec.id,
-       1,
-       orig.id,
-       free_t.id,
-       orig_sub.id,
-       free_sub.id,
-       (select id from rooms where name='Room 102'),
-       'Emergency leave cover'
+select CURRENT_DATE, sec.id, 1, orig.id, free_t.id, orig_sub.id, free_sub.id,
+       (select id from rooms where name='Room 201'), 'Emergency leave cover'
 from (
-  select se.id
-  from sections se
-  join classes c on c.id = se.class_id
+  select se.id from sections se join classes c on c.id = se.class_id
   where c.name = 'Class 8' and se.name = 'A'
 ) sec
 join routines orig_r on orig_r.section_id = sec.id and orig_r.day = extract(dow from CURRENT_DATE::date) and orig_r.period_number = 1 and orig_r.is_tag = false
 join teachers orig on orig.id = orig_r.teacher_id
 join subjects orig_sub on orig_sub.id = orig_r.subject_id
+cross join lateral (select array_agg(r.teacher_id) as busy
+  from routines r where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 1 and r.is_tag = false and r.section_id <> sec.id) busy
 cross join lateral (
-  select array_agg(r.teacher_id) as busy
-  from routines r
-  where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 1 and r.is_tag = false
-    and r.section_id <> sec.id
-) busy
-cross join lateral (
-  select t.id
-  from teachers t
-  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
-    and t.id <> orig.id
-  order by t.teacher_code
-  limit 1
+  select t.id from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[])) and t.id <> orig.id
+  order by t.teacher_code limit 1
 ) free_t
-join subjects free_sub on free_sub.id = (
-  select primary_subject_id from teachers where id = free_t.id
-)
+join subjects free_sub on free_sub.id = (select primary_subject_id from teachers where id = free_t.id)
 where extract(dow from CURRENT_DATE::date) between 0 and 4;
 
--- TODAY adjustment — Tag: 6-A period 3 (tag teacher swap to a free teacher)
-insert into adjustments (adjust_date, section_id, period_number, is_tag, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
-select CURRENT_DATE,
-       sec.id,
-       3,
-       true,
-       orig.id,
-       free_t.id,
-       orig_sub.id,
-       (select primary_subject_id from teachers where id = free_t.id),
-       (select id from rooms where name='Science Lab'),
-       'Tag teacher swap'
+-- TODAY adjustment — Primary: Class 10-C P4 (only on school days)
+insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, original_subject_id, new_subject_id, new_room_id, reason)
+select CURRENT_DATE, sec.id, 4, orig.id, free_t.id, orig_sub.id, free_sub.id,
+       (select id from rooms where name='Room 302'), 'Urgent family matter'
 from (
-  select se.id
-  from sections se
-  join classes c on c.id = se.class_id
-  where c.name = 'Class 6' and se.name = 'A'
+  select se.id from sections se join classes c on c.id = se.class_id
+  where c.name = 'Class 10' and se.name = 'C'
 ) sec
-join routines orig_r on orig_r.section_id = sec.id and orig_r.day = extract(dow from CURRENT_DATE::date) and orig_r.period_number = 3 and orig_r.is_tag = false
+join routines orig_r on orig_r.section_id = sec.id and orig_r.day = extract(dow from CURRENT_DATE::date) and orig_r.period_number = 4 and orig_r.is_tag = false
 join teachers orig on orig.id = orig_r.teacher_id
 join subjects orig_sub on orig_sub.id = orig_r.subject_id
+cross join lateral (select array_agg(r.teacher_id) as busy
+  from routines r where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 4 and r.is_tag = false and r.section_id <> sec.id) busy
 cross join lateral (
-  select array_agg(t.id) as busy
-  from (
-    select r.teacher_id as id from routines r
-      where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 3 and r.section_id <> sec.id and r.teacher_id is not null
-    union
-    select r.teacher_id from routines r
-      where r.day = extract(dow from CURRENT_DATE::date) and r.period_number = 3 and r.section_id = sec.id and r.is_tag = false and r.teacher_id is not null
-  ) t
-) busy
-cross join lateral (
-  select t.id
-  from teachers t
-  where t.id <> all (coalesce(busy.busy, array[]::uuid[]))
-    and t.id <> orig.id
-  order by t.teacher_code
-  limit 1
+  select t.id from teachers t
+  where t.id <> all (coalesce(busy.busy, array[]::uuid[])) and t.id <> orig.id
+  order by t.teacher_code limit 1
 ) free_t
+join subjects free_sub on free_sub.id = (select primary_subject_id from teachers where id = free_t.id)
 where extract(dow from CURRENT_DATE::date) between 0 and 4;
 
 -- =============================================================
@@ -465,9 +1053,9 @@ union all select 'subjects', count(*) from subjects
 union all select 'teachers', count(*) from teachers
 union all select 'sections', count(*) from sections
 union all select 'teacher_subjects', count(*) from teacher_subjects
-union all select 'routines (total)', count(*) from routines
 union all select 'routines (primary)', count(*) from routines where is_tag=false
 union all select 'routines (tag)', count(*) from routines where is_tag=true
+union all select 'routines (total)', count(*) from routines
 union all select 'adjustments', count(*) from adjustments;
 
 commit;

@@ -52,6 +52,7 @@ import {
   weeklyLoad,
   simulateTeacherAssignment,
   isTeacherBusy,
+  longestConsecutiveStretch,
 } from "@/lib/conflicts";
 import {
   saveAllAdjustments,
@@ -275,21 +276,35 @@ export function AdjustBuilder({
     return map;
   }, [teachers, routines, dayIndex]);
 
+  // Per-teacher stats for the active day: class count + longest continuous
+  // stretch. Used by the teacher rail and the assignment sheet.
+  const teacherDayStats = useMemo(() => {
+    const map = new Map<
+      string,
+      { count: number; stretch: number }
+    >();
+    if (dayIndex === null) return map;
+    for (const t of teachers) {
+      map.set(t.id, {
+        count: countDayPeriods(routines, t.id, dayIndex),
+        stretch: longestConsecutiveStretch(routines, t.id, dayIndex),
+      });
+    }
+    return map;
+  }, [teachers, routines, dayIndex]);
+
   const freeTeachersForSheet = useMemo(() => {
     if (sheetPeriod === null || dayIndex === null) return [];
     return teachers
-      .filter(
-        (t) =>
-          !isTeacherBusy(routines, t.id, dayIndex, sheetPeriod) ||
-          t.id === selectedTeacherId
-      )
       .map((t) => {
         const dayCount = countDayPeriods(routines, t.id, dayIndex);
+        const stretch = longestConsecutiveStretch(routines, t.id, dayIndex);
         const week = weeklyLoad(routines, t.id);
-        return { ...t, dayCount, weekTotal: week.total };
+        const busy = isTeacherBusy(routines, t.id, dayIndex, sheetPeriod);
+        return { ...t, dayCount, stretch, weekTotal: week.total, busy };
       })
-      .sort((a, b) => a.short_name.localeCompare(b.short_name));
-  }, [teachers, routines, dayIndex, sheetPeriod, selectedTeacherId]);
+      .sort((a, b) => Number(a.busy) - Number(b.busy) || a.short_name.localeCompare(b.short_name));
+  }, [teachers, routines, dayIndex, sheetPeriod]);
 
   const filteredFreeTeachers = useMemo(() => {
     if (!sheetSearch.trim()) return freeTeachersForSheet;
@@ -601,6 +616,9 @@ export function AdjustBuilder({
               {filteredTeachers.map((t) => {
                 const isSelected = t.id === selectedTeacherId;
                 const dayCount = teacherDayCounts.get(t.id) ?? 0;
+                const stretch = teacherDayStats.get(t.id)?.stretch ?? 0;
+                const heavy = dayCount >= 5;
+                const red = dayCount >= 6;
                 return (
                   <button
                     key={t.id}
@@ -616,12 +634,32 @@ export function AdjustBuilder({
                       <span className="font-medium text-slate-800">
                         {t.short_name}
                       </span>
-                      <span className="text-xs text-slate-400">
-                        {dayCount}P today
+                      <span
+                        className={cn(
+                          "rounded px-1.5 py-0.5 text-[11px] font-medium",
+                          red
+                            ? "bg-red-100 text-red-700"
+                            : heavy
+                              ? "bg-amber-100 text-amber-700"
+                              : dayCount >= 3
+                                ? "bg-slate-100 text-slate-600"
+                                : "bg-emerald-100 text-emerald-700"
+                        )}
+                        title={`${dayCount} classes today${
+                          stretch >= 1 ? ` · ${stretch} continuous` : ""
+                        }`}
+                      >
+                        {dayCount}P
+                        {stretch >= 3 ? ` ·${stretch}cont` : ""}
                       </span>
                     </div>
-                    <div className="mt-0.5 text-xs text-slate-500">
-                      {t.teacher_code}
+                    <div className="mt-0.5 flex items-center justify-between text-xs text-slate-500">
+                      <span>{t.teacher_code}</span>
+                      {stretch >= 3 && (
+                        <span className="text-amber-600">
+                          {stretch} continuous
+                        </span>
+                      )}
                     </div>
                   </button>
                 );
@@ -861,7 +899,7 @@ export function AdjustBuilder({
             <SheetDescription>
               {sheetTab === "tag"
                 ? "Select a free teacher for the tag session. Overrides subject/room too."
-                : "Select a free teacher for this period. Teachers already assigned elsewhere at this time are excluded."}
+                : "Pick a free teacher for this period. Busy teachers are shown for reference; load, continuous stretch and \"already 4/5 classes\" help you choose."}
             </SheetDescription>
           </SheetHeader>
 
@@ -949,7 +987,23 @@ export function AdjustBuilder({
               />
             </div>
 
-            <div className="max-h-[calc(100vh-22rem)] space-y-2 overflow-y-auto pr-1">
+            <div className="mb-3 flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2 text-sm">
+              <span className="text-slate-600">
+                <strong className="text-emerald-700">
+                  {freeTeachersForSheet.filter((t) => !t.busy || t.id === selectedTeacherId).length}
+                </strong>{" "}
+                available /{" "}
+                <strong className="text-slate-800">
+                  {freeTeachersForSheet.filter((t) => t.busy && t.id !== selectedTeacherId).length}
+                </strong>{" "}
+                busy in P{sheetPeriod}
+              </span>
+              <span className="text-[11px] text-slate-400">
+                {teachers.length} teachers total
+              </span>
+            </div>
+
+            <div className="max-h-[calc(100vh-24rem)] space-y-2 overflow-y-auto pr-1">
               {filteredFreeTeachers.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">
                   No free teachers available
@@ -974,37 +1028,58 @@ export function AdjustBuilder({
                   return (
                     <button
                       key={t.id}
+                      disabled={t.busy}
                       onClick={() =>
                         sheetTab === "tag"
                           ? handleAssignTag(sheetPeriod!, t.id)
                           : handleAssignPrimary(sheetPeriod!, t.id)
                       }
                       className={cn(
-                        "w-full rounded-lg border p-3 text-left transition-colors hover:border-[#0d9488] hover:bg-[#0d9488]/5",
+                        "w-full rounded-lg border p-3 text-left transition-colors",
+                        t.busy
+                          ? "cursor-not-allowed opacity-60"
+                          : "hover:border-[#0d9488] hover:bg-[#0d9488]/5",
                         levelColor
                       )}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-medium text-slate-800">
+                        <span className="flex items-center gap-1.5 font-medium text-slate-800">
                           {t.short_name}
+                          {t.busy ? (
+                            <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+                              busy
+                            </span>
+                          ) : (
+                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                              free
+                            </span>
+                          )}
                         </span>
-                        <div className="flex gap-2 text-xs text-slate-500">
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
                           <span>{t.dayCount}P day</span>
+                          <span>·</span>
+                          <span>{t.stretch >= 3 ? `${t.stretch} cont` : "—"}</span>
                           <span>·</span>
                           <span>{t.weekTotal}P wk</span>
                         </div>
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {t.teacher_code}
-                        {sim.level === "yellow" && (
-                          <span className="ml-2 text-amber-600">
-                            ⚠ {sim.reasons.join("; ")}
+                      <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                        <span className="text-slate-400">{t.teacher_code}</span>
+                        {t.dayCount >= 5 && (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
+                            already {t.dayCount} classes today
                           </span>
                         )}
-                        {sim.level === "red" && (
-                          <span className="ml-2 text-red-600">
-                            ✖ {sim.reasons.join("; ")}
+                        {t.stretch >= 3 && (
+                          <span className="rounded bg-orange-100 px-1.5 py-0.5 font-medium text-orange-700">
+                            {t.stretch} continuous
                           </span>
+                        )}
+                        {sim.level === "yellow" && (
+                          <span className="text-amber-600">⚠ {sim.reasons.join("; ")}</span>
+                        )}
+                        {sim.level === "red" && (
+                          <span className="text-red-600">✖ {sim.reasons.join("; ")}</span>
                         )}
                       </div>
                     </button>

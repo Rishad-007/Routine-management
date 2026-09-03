@@ -183,6 +183,8 @@ export function RoutineBuilder({
   // Load matrix when section changes.
   const loadSection = (id: string) => {
     setSectionId(id);
+    const sectionRoom =
+      sections.find((s) => s.id === id)?.room_id ?? null;
     const m: Matrix = {};
     for (const r of routines) {
       if (r.section_id !== id) continue;
@@ -209,7 +211,7 @@ export function RoutineBuilder({
         m[r.day][r.period_number] = {
           subjectId: r.subject_id,
           teacherId: r.teacher_id,
-          roomId: r.room_id,
+          roomId: r.room_id ?? sectionRoom,
           isAdjusted: r.is_adjusted,
           isTag: existing ? existing.subjectId2 !== null : false,
           subjectId2: existing?.subjectId2 ?? null,
@@ -637,13 +639,13 @@ export function RoutineBuilder({
                           roomId: v === "none" ? null : (v ?? null),
                         })
                       }
-                      items={[{ value: "none", label: "— None —" }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
+                      items={[{ value: "none", label: "Section room", }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Assign room" />
+                        <SelectValue placeholder="Section room" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">— None —</SelectItem>
+                        <SelectItem value="none">Section room</SelectItem>
                         {rooms.map((r) => (
                           <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
                         ))}
