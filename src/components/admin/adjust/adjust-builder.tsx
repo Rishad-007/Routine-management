@@ -667,22 +667,22 @@ export function AdjustBuilder({
                 </div>
 
                 <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
-                  <table className="w-full border-collapse text-sm">
+                  <table className="w-full border-collapse text-base">
                     <thead>
                       <tr>
-                        <th className="w-16 border border-slate-200 bg-[#1e3a5f] px-2 py-2 text-center text-xs font-semibold uppercase text-white">
+                        <th className="w-16 border border-slate-200 bg-[#1e3a5f] px-2 py-2.5 text-center text-sm font-semibold uppercase text-white">
                           P
                         </th>
-                        <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
+                        <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2.5 text-left text-sm font-semibold uppercase text-slate-600">
                           Class
                         </th>
-                        <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
+                        <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2.5 text-left text-sm font-semibold uppercase text-slate-600">
                           Session
                         </th>
-                        <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-left text-xs font-semibold uppercase text-slate-600">
+                        <th className="border border-slate-200 bg-[#f1f5f9] px-3 py-2.5 text-left text-sm font-semibold uppercase text-slate-600">
                           Status
                         </th>
-                        <th className="w-20 border border-slate-200 bg-[#f1f5f9] px-3 py-2 text-center text-xs font-semibold uppercase text-slate-600">
+                        <th className="w-24 border border-slate-200 bg-[#f1f5f9] px-3 py-2.5 text-center text-sm font-semibold uppercase text-slate-600">
                           Action
                         </th>
                       </tr>
@@ -716,26 +716,26 @@ export function AdjustBuilder({
                                 "bg-amber-50"
                             )}
                           >
-                            <td className="border border-slate-200 px-2 py-2 text-center text-xs font-bold text-slate-600">
+                            <td className="border border-slate-200 px-2 py-2 text-center text-sm font-bold text-slate-600">
                               P{cell.period}
                               {cell.period === TIFFIN_AFTER_PERIOD && (
-                                <span className="block text-[10px] font-normal text-amber-500">
+                                <span className="block text-xs font-normal text-amber-500">
                                   Tiffin↓
                                 </span>
                               )}
                             </td>
                             <td className="border border-slate-200 px-3 py-2">
-                              <span className="font-medium text-[#1e3a5f]">
+                              <span className="text-base font-medium text-[#1e3a5f]">
                                 {cell.className}-{cell.sectionName}
                               </span>
                             </td>
                             <td className="border border-slate-200 px-3 py-2">
                               {/* Primary */}
                               <div>
-                                <span className="text-sm font-medium text-slate-700">
+                                <span className="text-base font-medium text-slate-700">
                                   {cell.subjectName}
                                 </span>
-                                <span className="ml-1 text-xs text-slate-500">
+                                <span className="ml-1 text-sm text-slate-500">
                                   ·{" "}
                                   {effectiveName ??
                                     selectedTeacher.short_name}
@@ -743,7 +743,7 @@ export function AdjustBuilder({
                                 {(hasOverride || cell.isAdjusted) && (
                                   <Badge
                                     variant="secondary"
-                                    className="ml-1 text-[9px]"
+                                    className="ml-1 text-xs"
                                   >
                                     Adj
                                   </Badge>
@@ -752,24 +752,24 @@ export function AdjustBuilder({
                               {/* Tag row */}
                               {cell.isTag && (
                                 <div className="mt-1 border-t border-dashed border-teal-200 pt-1">
-                                  <span className="text-sm font-medium text-teal-700">
+                                  <span className="text-base font-medium text-teal-700">
                                     {tagEffectiveSubject ?? "—"}
                                   </span>
-                                  <span className="ml-1 text-xs text-teal-600">
+                                  <span className="ml-1 text-sm text-teal-600">
                                     ·{" "}
                                     {teachers.find((t) => t.id === cell.tagEffectiveTeacherId)?.short_name || "—"}
                                   </span>
                                   {cell.isTagAdjusted && (
                                     <Badge
                                       variant="secondary"
-                                      className="ml-1 bg-teal-100 text-[9px] text-teal-700"
+                                      className="ml-1 bg-teal-100 text-xs text-teal-700"
                                     >
                                       Tag Adj
                                     </Badge>
                                   )}
                                   <Badge
                                     variant="secondary"
-                                    className="ml-1 bg-teal-100 text-[9px] text-teal-700"
+                                    className="ml-1 bg-teal-100 text-xs text-teal-700"
                                   >
                                     Tag
                                   </Badge>
@@ -779,19 +779,19 @@ export function AdjustBuilder({
                             <td className="border border-slate-200 px-3 py-2">
                               {hasOverride || cell.isAdjusted ? (
                                 <div className="flex items-center gap-1.5">
-                                  <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                                  <span className="text-sm font-medium text-amber-700">
+                                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                                  <span className="text-base font-medium text-amber-700">
                                     {effectiveName ?? "—"}
                                   </span>
                                   <Badge
                                     variant="secondary"
-                                    className="text-[10px]"
+                                    className="text-sm"
                                   >
                                     Adjusted
                                   </Badge>
                                 </div>
                               ) : (
-                                <span className="text-sm text-slate-500">
+                                <span className="text-base text-slate-500">
                                   {selectedTeacher.short_name}
                                 </span>
                               )}
@@ -807,7 +807,7 @@ export function AdjustBuilder({
                                       "primary"
                                     )
                                   }
-                                  className="h-6 text-[10px]"
+                                  className="h-8 text-sm"
                                 >
                                   Change
                                 </Button>
@@ -821,7 +821,7 @@ export function AdjustBuilder({
                                         "tag"
                                       )
                                     }
-                                    className="h-6 text-[10px] text-teal-600"
+                                    className="h-8 text-sm text-teal-600"
                                   >
                                     Tag
                                   </Button>

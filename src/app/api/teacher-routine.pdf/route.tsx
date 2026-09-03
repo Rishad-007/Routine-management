@@ -86,6 +86,7 @@ const styles = StyleSheet.create({
   adj: { fontSize: 6, color: "#d97706" },
   empty: { fontSize: 8, color: "#cbd5e1" },
   footer: { marginTop: 12, textAlign: "center", fontSize: 7, color: "#94a3b8" },
+  credit: { textAlign: "center", fontSize: 6, color: "#b0b7c0", marginTop: 2 },
 });
 
 export async function GET(req: NextRequest) {
@@ -178,6 +179,9 @@ export async function GET(req: NextRequest) {
           ))}
         </View>
         <Text style={styles.footer}>Cantonment Public School &amp; College, Rangpur</Text>
+        <Text style={styles.credit}>
+          Software by Rishad Nur &amp; CPSCR ICT department (School)
+        </Text>
       </Page>
     </Document>
   );

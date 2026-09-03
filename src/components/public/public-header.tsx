@@ -1,9 +1,18 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GraduationCap, CalendarDays, Users, Home } from "lucide-react";
+import {
+  GraduationCap,
+  CalendarDays,
+  Users,
+  Home,
+  ShieldCheck,
+  LogIn,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SESSION_COOKIE } from "@/lib/session-cookie";
 
 const LINKS = [
   { href: "/", label: "Home", icon: Home },
@@ -14,6 +23,14 @@ const LINKS = [
 
 export function PublicHeader() {
   const pathname = usePathname();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const hasSession = document.cookie
+      .split(";")
+      .some((c) => c.trim().startsWith(`${SESSION_COOKIE}=`));
+    setIsAdmin(hasSession);
+  }, []);
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -49,6 +66,24 @@ export function PublicHeader() {
               </Link>
             );
           })}
+          <Link
+            href={isAdmin ? "/admin" : "/login"}
+            className={cn(
+              "ml-1 flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              isAdmin
+                ? "bg-[#0d9488] text-white hover:bg-[#0f766e]"
+                : "border border-slate-200 text-slate-600 hover:border-[#0d9488]/40 hover:bg-teal-50 hover:text-[#0d9488]"
+            )}
+          >
+            {isAdmin ? (
+              <ShieldCheck className="h-4 w-4" />
+            ) : (
+              <LogIn className="h-4 w-4" />
+            )}
+            <span className="hidden md:inline">
+              {isAdmin ? "Admin" : "Admin Login"}
+            </span>
+          </Link>
         </nav>
       </div>
     </header>

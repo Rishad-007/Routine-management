@@ -95,6 +95,12 @@ const styles = StyleSheet.create({
     fontSize: 7,
     color: "#94a3b8",
   },
+  credit: {
+    textAlign: "center",
+    fontSize: 6,
+    color: "#b0b7c0",
+    marginTop: 1,
+  },
 });
 
 interface ReportRow {
@@ -309,6 +315,9 @@ export async function GET(req: NextRequest) {
 
           <Text style={styles.footer}>
             Cantonment Public School &amp; College, Rangpur
+          </Text>
+          <Text style={styles.credit}>
+            Software by Rishad Nur &amp; CPSCR ICT department (School)
           </Text>
         </Page>
       ))}
