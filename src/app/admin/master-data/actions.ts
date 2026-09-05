@@ -1,14 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { authed } from "@/app/admin/auth-helpers";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireAdmin } from "@/lib/auth";
-
-// Auth-wrapped admin client for all writes
-async function authed() {
-  const session = await requireAdmin();
-  return { session, admin: createAdminClient() };
-}
 
 // ---------------- Classes ----------------
 

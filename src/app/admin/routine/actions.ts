@@ -1,8 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { requireAdmin } from "@/lib/auth";
+import { authed } from "@/app/admin/auth-helpers";
 import {
   allTeacherLoads,
   isTeacherBusy,
@@ -23,11 +22,6 @@ export interface ConflictWarning {
   level: "yellow" | "red";
   teacherName: string;
   detail: string;
-}
-
-async function authed() {
-  const session = await requireAdmin();
-  return { session, admin: createAdminClient() };
 }
 
 /**

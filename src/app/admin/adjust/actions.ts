@@ -1,8 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { requireAdmin } from "@/lib/auth";
+import { authed } from "@/app/admin/auth-helpers";
 import { simulateTeacherAssignment } from "@/lib/conflicts";
 import { getSchoolDayIndex } from "@/lib/periods";
 import type { RoutineRow } from "@/lib/types";
@@ -20,11 +19,6 @@ export interface PeriodAdjustment {
   reason: string | null;
   level: "ok" | "yellow" | "red";
   reasons: string[];
-}
-
-async function authed() {
-  const session = await requireAdmin();
-  return { session, admin: createAdminClient() };
 }
 
 /**
