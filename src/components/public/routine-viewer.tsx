@@ -19,6 +19,7 @@ interface Props {
   classes: ClassRow[];
   sections: SectionRow[];
   initialSectionId?: string;
+  initialClassId?: string;
   matrices: Record<string, RoutineMatrix>;
   season: Season;
 }
@@ -27,12 +28,14 @@ export function RoutineViewer({
   classes,
   sections,
   initialSectionId,
+  initialClassId,
   matrices,
   season,
 }: Props) {
   const [classId, setClassId] = useState<string>(
-    (initialSectionId &&
-      sections.find((s) => s.id === initialSectionId)?.class_id) ||
+    initialClassId ||
+      (initialSectionId &&
+        sections.find((s) => s.id === initialSectionId)?.class_id) ||
       ""
   );
   const [sectionId, setSectionId] = useState<string>(initialSectionId ?? "");

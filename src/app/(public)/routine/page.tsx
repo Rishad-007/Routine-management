@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 export default async function RoutinePage({
   searchParams,
 }: {
-  searchParams: Promise<{ section?: string }>;
+  searchParams: Promise<{ section?: string; class?: string }>;
 }) {
   const params = await searchParams;
   const [classes, sections, routines, teachers, subjects, rooms, season, adjustments] =
@@ -61,6 +61,7 @@ export default async function RoutinePage({
         classes={classes}
         sections={sections}
         initialSectionId={params.section}
+        initialClassId={params.class}
         matrices={matrices}
         season={(season as Season) ?? "summer"}
       />
