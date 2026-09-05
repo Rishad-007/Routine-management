@@ -28,6 +28,14 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import {
   Trash2,
   Plus,
@@ -35,6 +43,7 @@ import {
   GripVertical,
   Users,
   Loader2,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -42,6 +51,11 @@ import {
   PERIOD_ORDER,
   TIFFIN_AFTER_PERIOD,
 } from "@/lib/constants";
+import {
+  countDayPeriods,
+  weeklyLoad,
+  longestConsecutiveStretch,
+} from "@/lib/conflicts";
 import { saveSectionRoutine, type MatrixEdit } from "@/app/admin/routine/actions";
 import type {
   ClassRow,
@@ -177,6 +191,9 @@ export function RoutineBuilder({
   const [selected, setSelected] = useState<{ day: number; period: number } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [teacherSheetOpen, setTeacherSheetOpen] = useState(false);
+  const [teacherSheetTarget, setTeacherSheetTarget] = useState<"primary" | "tag">("primary");
+  const [sheetSearch, setSheetSearch] = useState("");
 
   const classSections = sections.filter((s) => s.class_id === classId);
 
@@ -229,14 +246,102 @@ export function RoutineBuilder({
     ? matrix[selected.day]?.[selected.period]
     : undefined;
 
-  const teachersForSubject = (subjectId: string | null) => {
-    if (!subjectId) return teachers;
-    return teachers.filter(
+  // Rich teacher-picker list for the active cell (day + period).
+  // For each eligible teacher: day count, busy status, the section they are
+  // busy with (if any), consecutive stretch and weekly total.
+  const teacherPickerList = useMemo(() => {
+    if (!selected) return [];
+    const { day, period } = selected;
+    const targetSubjectId =
+      teacherSheetTarget === "tag"
+        ? selectedCell?.subjectId2 ?? null
+        : selectedCell?.subjectId ?? null;
+
+    const eligible = targetSubjectId
+      ? teachers.filter(
+          (t) =>
+            t.is_open_teacher ||
+            t.primary_subject_id === targetSubjectId ||
+            subjectsByTeacher.get(t.id)?.has(targetSubjectId)
+        )
+      : teachers;
+
+    return eligible
+      .map((t) => {
+        // A teacher already assigned to THIS cell (same section/day/period) is
+        // not "busy" — exclude the current cell from the busy check.
+        const busy = routines.some(
+          (r) =>
+            r.teacher_id === t.id &&
+            r.day === day &&
+            r.period_number === period &&
+            !(r.section_id === sectionId)
+        );
+        let busyLabel: string | null = null;
+        if (busy) {
+          const conflict = routines.find(
+            (r) =>
+              r.teacher_id === t.id &&
+              r.day === day &&
+              r.period_number === period &&
+              !(r.section_id === sectionId)
+          );
+          if (conflict) {
+            const sec = sections.find((s) => s.id === conflict.section_id);
+            const cls = sec ? classes.find((c) => c.id === sec.class_id) : undefined;
+            busyLabel = cls && sec ? `${cls.name}-${sec.name}` : "another section";
+          }
+        }
+        return {
+          ...t,
+          dayCount: countDayPeriods(routines, t.id, day),
+          stretch: longestConsecutiveStretch(routines, t.id, day),
+          weekTotal: weeklyLoad(routines, t.id).total,
+          busy,
+          busyLabel,
+        };
+      })
+      .sort(
+        (a, b) =>
+          Number(a.busy) - Number(b.busy) || a.short_name.localeCompare(b.short_name)
+      );
+  }, [
+    selected,
+    teacherSheetTarget,
+    selectedCell,
+    routines,
+    sectionId,
+    sections,
+    classes,
+    teachers,
+    subjectsByTeacher,
+  ]);
+
+  const filteredTeacherPicker = useMemo(() => {
+    if (!sheetSearch.trim()) return teacherPickerList;
+    const q = sheetSearch.toLowerCase();
+    return teacherPickerList.filter(
       (t) =>
-        t.is_open_teacher ||
-        t.primary_subject_id === subjectId ||
-        subjectsByTeacher.get(t.id)?.has(subjectId)
+        t.short_name.toLowerCase().includes(q) ||
+        t.teacher_code.toLowerCase().includes(q) ||
+        t.full_name.toLowerCase().includes(q)
     );
+  }, [teacherPickerList, sheetSearch]);
+
+  const openTeacherSheet = (target: "primary" | "tag") => {
+    setTeacherSheetTarget(target);
+    setSheetSearch("");
+    setTeacherSheetOpen(true);
+  };
+
+  const handleSelectTeacher = (teacherId: string) => {
+    if (!selected) return;
+    if (teacherSheetTarget === "tag") {
+      updateCell(selected.day, selected.period, { teacherId2: teacherId });
+    } else {
+      updateCell(selected.day, selected.period, { teacherId });
+    }
+    setTeacherSheetOpen(false);
   };
 
   const handleSelectClass = (v: string | null) => {
@@ -602,32 +707,17 @@ export function RoutineBuilder({
 
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-slate-500">Teacher</p>
-                    <Select
-                      value={selectedCell?.teacherId ?? "none"}
-                      onValueChange={(v) =>
-                        updateCell(selected.day, selected.period, {
-                          teacherId: v === "none" ? null : (v ?? null),
-                        })
-                      }
-                      items={[{ value: "none", label: "— None —" }, ...teachersForSubject(selectedCell?.subjectId ?? null).map(t => ({ value: t.id, label: t.is_open_teacher ? `${t.short_name} (open)` : t.short_name }))]}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start font-normal"
+                      onClick={() => openTeacherSheet("primary")}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Assign teacher" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">— None —</SelectItem>
-                        {teachersForSubject(selectedCell?.subjectId ?? null).map((t) => (
-                          <SelectItem
-                            key={t.id}
-                            value={t.id}
-                            label={t.is_open_teacher ? `${t.short_name} (open)` : t.short_name}
-                          >
-                            {t.short_name}
-                            {t.is_open_teacher ? " (open)" : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      <Users className="mr-2 h-4 w-4 text-slate-400" />
+                      {selectedCell?.teacherId
+                        ? teacherNames.get(selectedCell.teacherId) ?? "—"
+                        : "Select teacher"}
+                    </Button>
                   </div>
 
                   <div className="space-y-1">
@@ -686,28 +776,17 @@ export function RoutineBuilder({
 
                       <div className="space-y-1">
                         <p className="text-xs font-medium text-teal-600">Teacher</p>
-                        <Select
-                          value={selectedCell?.teacherId2 ?? "none"}
-                          onValueChange={(v) =>
-                            updateCell(selected.day, selected.period, {
-                              teacherId2: v === "none" ? null : (v ?? null),
-                            })
-                          }
-                          items={[{ value: "none", label: "— None —" }, ...teachersForSubject(selectedCell?.subjectId2 ?? null).map(t => ({ value: t.id, label: t.short_name }))]}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full justify-start font-normal"
+                          onClick={() => openTeacherSheet("tag")}
                         >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Assign teacher" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">— None —</SelectItem>
-                            {teachersForSubject(selectedCell?.subjectId2 ?? null).map((t) => (
-                              <SelectItem key={t.id} value={t.id}>
-                                {t.short_name}
-                                {t.is_open_teacher ? " (open)" : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          <Users className="mr-2 h-4 w-4 text-teal-600/70" />
+                          {selectedCell?.teacherId2
+                            ? teacherNames.get(selectedCell.teacherId2) ?? "—"
+                            : "Select teacher"}
+                        </Button>
                       </div>
 
                       <div className="space-y-1">
@@ -746,6 +825,115 @@ export function RoutineBuilder({
           </div>
         </div>
       )}
+
+      {/* Rich teacher picker */}
+      <Sheet open={teacherSheetOpen} onOpenChange={setTeacherSheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-sm">
+          <SheetHeader>
+            <SheetTitle>
+              {teacherSheetTarget === "tag" ? "Tag session" : "Primary session"} · Select teacher
+            </SheetTitle>
+            <SheetDescription>
+              {selected
+                ? `${DAY_LABEL_LIST[selected.day]} · Period ${selected.period} — free teachers first, busy teachers are disabled.`
+                : "Select a teacher."}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex flex-col gap-3 overflow-y-auto px-4 pb-6">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                placeholder="Search by name or code..."
+                value={sheetSearch}
+                onChange={(e) => setSheetSearch(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+
+            <div className="mb-1 flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2 text-sm">
+              <span className="text-slate-600">
+                <strong className="text-emerald-700">
+                  {teacherPickerList.filter((t) => !t.busy).length}
+                </strong>{" "}
+                available /{" "}
+                <strong className="text-slate-800">
+                  {teacherPickerList.filter((t) => t.busy).length}
+                </strong>{" "}
+                busy
+              </span>
+              <span className="text-[11px] text-slate-400">
+                {teacherPickerList.length} teachers
+              </span>
+            </div>
+
+            {filteredTeacherPicker.length === 0 ? (
+              <p className="py-8 text-center text-sm text-slate-400">
+                No teachers available for this subject.
+              </p>
+            ) : (
+              filteredTeacherPicker.map((t) => (
+                <button
+                  key={t.id}
+                  disabled={t.busy}
+                  onClick={() => handleSelectTeacher(t.id)}
+                  className={cn(
+                    "w-full rounded-lg border p-3 text-left transition-colors",
+                    t.busy
+                      ? "cursor-not-allowed opacity-60"
+                      : "hover:border-[#0d9488] hover:bg-[#0d9488]/5"
+                  )}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-medium text-slate-800">
+                      {t.short_name}
+                      {t.busy ? (
+                        <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+                          busy
+                        </span>
+                      ) : (
+                        <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                          free
+                        </span>
+                      )}
+                    </span>
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <span>{t.dayCount}P today</span>
+                      <span>·</span>
+                      <span>{t.stretch >= 2 ? `${t.stretch} cont` : "—"}</span>
+                      <span>·</span>
+                      <span>{t.weekTotal}P wk</span>
+                    </div>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                    <span className="text-slate-400">{t.teacher_code}</span>
+                    {t.is_open_teacher && (
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-500">
+                        open
+                      </span>
+                    )}
+                    {t.dayCount >= 5 && (
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
+                        already {t.dayCount} classes today
+                      </span>
+                    )}
+                    {t.stretch >= 3 && (
+                      <span className="rounded bg-orange-100 px-1.5 py-0.5 font-medium text-orange-700">
+                        {t.stretch} continuous
+                      </span>
+                    )}
+                    {t.busy && t.busyLabel && (
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">
+                        busy in {t.busyLabel}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
