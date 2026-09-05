@@ -87,6 +87,21 @@ export async function getAdjustments(): Promise<AdjustmentRow[]> {
   return (data as AdjustmentRow[]) ?? [];
 }
 
+/**
+ * All adjustments across every date (historical + future).
+ * Used by the admin Adjust page so past days' substitutions stay
+ * viewable and downloadable. Public routine views keep using
+ * getAdjustments() (>= today) so the routine rolls back automatically.
+ */
+export async function getAllAdjustments(): Promise<AdjustmentRow[]> {
+  const { data, error } = await (await db())
+    .from("adjustments")
+    .select("*")
+    .order("adjust_date", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data as AdjustmentRow[]) ?? [];
+}
+
 export async function getSettings(): Promise<SettingsRow[]> {
   const { data, error } = await (await db()).from("settings").select("*");
   if (error) throw new Error(error.message);

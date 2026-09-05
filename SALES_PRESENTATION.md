@@ -319,7 +319,7 @@
 - 08:07 — assigns a free substitute; system confirms no clash
 - 09:10 — lobby screen shows period 1 with the actual teacher
 - 14:30 — one click downloads the signed Daily Adjustment Report
-- Tomorrow — adjustments auto-clear; master routine returns
+- Tomorrow — the master routine returns automatically; today's record stays saved, viewable & downloadable by date
 
 **Speaker note:**
 > "Let me close with a single morning. A teacher reports absent at eight. By 08:05 the coordinator has opened the day, by 08:07 a free substitute is assigned and confirmed clash-free. At 09:10 the lobby screen shows the running class with the real teacher. At 14:30 the signed report is one click away. And tomorrow, the system automatically resets to the master routine. That is a better school day — for your coordinators, your teachers, and your students."

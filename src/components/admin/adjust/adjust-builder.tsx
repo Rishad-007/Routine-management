@@ -46,7 +46,7 @@ import {
   PERIOD_ORDER,
   TIFFIN_AFTER_PERIOD,
 } from "@/lib/constants";
-import { getSchoolDayIndex } from "@/lib/periods";
+import { getSchoolDayIndex, getTodayLocal } from "@/lib/periods";
 import {
   countDayPeriods,
   weeklyLoad,
@@ -147,6 +147,13 @@ export function AdjustBuilder({
     [date]
   );
   const isNoSchool = dayIndex === null;
+
+  // Past dates are permanently stored history — viewable & downloadable
+  // but not editable. Future/today dates remain editable.
+  const isPastDate = useMemo(
+    () => (date ? date < getTodayLocal() : false),
+    [date]
+  );
 
   const subjectMap = useMemo(
     () => new Map(subjects.map((s) => [s.id, s])),
@@ -317,6 +324,7 @@ export function AdjustBuilder({
   }, [freeTeachersForSheet, sheetSearch]);
 
   const handleCellClick = (period: number, tab: "primary" | "tag" = "primary") => {
+    if (isPastDate) return; // historical dates are read-only
     setSheetPeriod(period);
     setSheetTab(tab);
     setSheetSearch("");
@@ -566,6 +574,14 @@ export function AdjustBuilder({
             </span>
           </div>
         )}
+        {isPastDate && (
+          <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+            <BookOpen className="h-4 w-4" />
+            <span>
+              Historical date — <strong>read only</strong>
+            </span>
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-3 rounded-lg border border-[#0d9488]/20 bg-teal-50/50 px-3 py-2">
           <div className="pr-1">
             <p className="text-xs font-semibold text-[#0d9488]">
@@ -686,7 +702,7 @@ export function AdjustBuilder({
                       {DAY_LABEL_LIST[dayIndex!]} routine for {date}
                     </p>
                   </div>
-                  {hasChanges && (
+                  {hasChanges && !isPastDate && (
                     <div className="flex gap-2">
                       <Button
                         variant="outline"
@@ -854,6 +870,7 @@ export function AdjustBuilder({
                                       "primary"
                                     )
                                   }
+                                  disabled={isPastDate}
                                   className="h-8 text-sm"
                                 >
                                   Change
@@ -868,6 +885,7 @@ export function AdjustBuilder({
                                         "tag"
                                       )
                                     }
+                                    disabled={isPastDate}
                                     className="h-8 text-sm text-teal-600"
                                   >
                                     Tag

@@ -5,7 +5,7 @@ import {
   getSubjects,
   getRooms,
   getRoutines,
-  getAdjustments,
+  getAllAdjustments,
 } from "@/lib/data";
 import { AdjustBuilder } from "@/components/admin/adjust/adjust-builder";
 
@@ -20,7 +20,7 @@ export default async function AdminAdjustPage() {
       getSubjects(),
       getRooms(),
       getRoutines(),
-      getAdjustments(),
+      getAllAdjustments(),
     ]);
 
   return (

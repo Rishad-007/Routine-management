@@ -128,11 +128,11 @@ A dedicated, **teacher-centred** daily substitution workflow:
 
 ---
 
-### 3.6 Automatic Cleanup of Temporary Adjustments
+### 3.6 Permanent Adjustment History
 
-Adjustments are **date-scoped** — they apply to one specific day and are **automatically removed once the date has passed** (a database trigger purges expired entries on the next change).
+Adjustments are **date-scoped** — they apply to one specific day only, and the master routine automatically rolls back when the date passes. However, **every record is stored permanently** in the database, so past days' substitutions remain viewable in the Adjust page (read-only) and can be **downloaded as a PDF report for any date**.
 
-**Vs. the traditional method:** no more stale substitution lists carried forward by mistake, and no manual "yesterday's changes are done, clear the board" chore. The routine automatically reverts to the master timetable the next day.
+**Vs. the traditional method:** no more stale substitution lists carried forward by mistake, no manual "yesterday's changes are done, clear the board" chore, and — unlike a paper register that gets thrown away — a lasting, searchable record of every past day's changes for audits and review.
 
 ---
 
@@ -248,7 +248,7 @@ You are not buying "a spreadsheet that looks like a timetable." You are buying:
 4. **09:10** — The lobby screen shows **period 1** with the actual (substituted) teacher for the running class, live and accurate.
 5. **During the day** — Students can check any class routine and its live status on their phones.
 6. **14:30** — The coordinator clicks **Download** on the Daily Adjustment Report; a signed, grouped-by-unavailable-teacher PDF is generated for the record and for display.
-7. **Tomorrow** — Yesterday's adjustments auto-purge; the master routine is automatically back in force.
+7. **Tomorrow** — The master routine is automatically back in force; today's adjustment record stays stored in history, viewable and downloadable by date.
 
 ---
 

@@ -940,12 +940,14 @@ join subjects free_sub on free_sub.id = (select primary_subject_id from teachers
 
 -- =============================================================
 --  ADJUSTMENTS
---  Temporary, date-scoped changes for testing the Adjust page.
+--  Date-scoped changes for testing the Adjust page.
 --  Includes a TODAY adjustment (dynamic date) so you can see it live.
---  Past adjustments are auto-deleted by the trigger on next write.
+--  Past adjustments are KEPT permanently as browsable history —
+--  the Adjust page shows them read-only and the report is downloadable
+--  by any date. (No auto-purge trigger exists.)
 -- =============================================================
 
--- Past adjustment (auto-purged): Class 8-A, Monday P3
+-- Historical adjustment: Class 8-A, Monday P3
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, reason)
 select '2026-09-01', sec.id, 3, orig.id, free_t.id, 'Teacher on sick leave'
 from (
@@ -963,7 +965,7 @@ cross join lateral (
   order by t.teacher_code limit 1
 ) free_t;
 
--- Past adjustment (auto-purged): Class 9-C, Monday P6
+-- Historical adjustment: Class 9-C, Monday P6
 insert into adjustments (adjust_date, section_id, period_number, original_teacher_id, new_teacher_id, reason)
 select '2026-09-01', sec.id, 6, orig.id, free_t.id, 'Training duty'
 from (

@@ -8,8 +8,6 @@
 -- =============================================
 
 -- ---------- DROP EXISTING (FK-safe order) ----------
-drop trigger if exists trg_purge_expired_adjustments on adjustments;
-drop function if exists purge_expired_adjustments();
 drop trigger if exists trg_validate_routine_slot on routines;
 drop function if exists validate_routine_slot();
 drop trigger if exists trg_validate_adjustment_slot on adjustments;
@@ -157,22 +155,13 @@ create unique index uk_routines_teacher_slot
   where teacher_id is not null;
 
 -- =============================================
--- Auto-delete expired adjustments trigger
--- Purges any adjustment whose adjust_date < today
--- whenever any write occurs on the adjustments table.
+-- Adjustment history — permanently retained
 -- =============================================
-create function purge_expired_adjustments() returns trigger as $$
-begin
-  if pg_trigger_depth() > 1 then
-    return coalesce(new, old);
-  end if;
-  delete from adjustments where adjust_date < CURRENT_DATE;
-  return coalesce(new, old);
-end $$ language plpgsql;
+-- NOTE: adjustment history is intentionally KEPT forever.
+-- Adjustments are date-scoped: only the selected day's changes are shown
+-- in views/PDFs, and past days' records remain browsable & downloadable.
+-- (No purge trigger — data persists in `adjustments` permanently.)
 
-create trigger trg_purge_expired_adjustments
-after insert or update or delete or truncate on adjustments
-for each statement execute function purge_expired_adjustments();
 
 -- =============================================
 -- Routine slot validator: block a teacher from

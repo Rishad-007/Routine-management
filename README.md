@@ -9,7 +9,7 @@ A daily class **routine management system** for **Cantonment Public School & Col
 - **Admin panel** (password-protected):
   - **Update Database** — manage classes, sections, subjects, teachers, rooms & admins.
   - **Update Routine** — build a section's full weekly routine (primary + tag periods).
-  - **Adjust Routine** — temporary, date-scoped teacher substitutions (auto-purged after the date passes).
+  - **Adjust Routine** — temporary, date-scoped teacher substitutions (history kept permanently; downloadable as a daily report by any date).
   - **Daily Adjustment Report** — whole-school PDF grouped by unavailable teacher.
 - **PDF export** — class routine, teacher routine, and daily adjustment report.
 - **PWA** — installable, with offline app-shell support.
@@ -55,7 +55,7 @@ Copy `.env.local.example` to `.env.local` and fill in real values:
 
 Apply the SQL scripts in the Supabase SQL Editor (in order):
 
-1. `supabase/schema.sql` — tables, RLS, and the auto-purge trigger for expired adjustments.
+1. `supabase/schema.sql` — tables, RLS, and conflict-validation triggers.
 2. `supabase/demo-data.sql` — demo classes/teachers/subjects/routines + sample daily adjustments.
 
 ## Scripts
