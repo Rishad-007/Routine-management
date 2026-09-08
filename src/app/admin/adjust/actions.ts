@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import { simulateTeacherAssignment } from "@/lib/conflicts";
-import { getSchoolDayIndex } from "@/lib/periods";
+import {
+  getSchoolDayIndex,
+  resolveAdjustDate,
+} from "@/lib/periods";
 import type { RoutineRow } from "@/lib/types";
 
 export interface PeriodAdjustment {
@@ -32,19 +35,21 @@ export async function saveDayAdjustments(
   changes: PeriodAdjustment[]
 ) {
   const { admin } = await authed();
-  if (!adjustDate || !sectionId) return { error: "Date and section are required." };
+  const effectiveDate = resolveAdjustDate(adjustDate);
+  if (!effectiveDate || !sectionId)
+    return { error: "Date and section are required." };
 
   const { error: delErr } = await admin
     .from("adjustments")
     .delete()
-    .eq("adjust_date", adjustDate)
+    .eq("adjust_date", effectiveDate)
     .eq("section_id", sectionId);
   if (delErr) return { error: delErr.message };
 
   const insertRows = changes
     .filter((c) => c.newTeacherId || c.newSubjectId || c.newRoomId)
     .map((c) => ({
-      adjust_date: adjustDate,
+      adjust_date: effectiveDate,
       section_id: sectionId,
       period_number: c.period,
       is_tag: c.isTag,
@@ -78,9 +83,12 @@ export async function saveAllAdjustments(
   force: boolean
 ) {
   const { admin } = await authed();
-  if (!adjustDate) return { error: "Date is required." };
+  const effectiveDate = resolveAdjustDate(adjustDate);
+  if (!effectiveDate) return { error: "Date is required." };
 
-  const dayIndex = getSchoolDayIndex(new Date(adjustDate + "T00:00:00"));
+  const dayIndex = getSchoolDayIndex(
+    new Date(effectiveDate + "T00:00:00")
+  );
   if (dayIndex === null) return { error: "Cannot adjust on a weekend." };
 
   // Fetch all routines for conflict validation.
@@ -145,14 +153,14 @@ export async function saveAllAdjustments(
     const { error: delErr } = await admin
       .from("adjustments")
       .delete()
-      .eq("adjust_date", adjustDate)
+      .eq("adjust_date", effectiveDate)
       .eq("section_id", sectionId);
     if (delErr) return { error: delErr.message };
 
     const insertRows = sectionChanges
       .filter((c) => c.newTeacherId || c.newSubjectId || c.newRoomId)
       .map((c) => ({
-        adjust_date: adjustDate,
+        adjust_date: effectiveDate,
         section_id: sectionId,
         period_number: c.period,
         is_tag: c.isTag,

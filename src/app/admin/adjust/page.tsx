@@ -7,6 +7,7 @@ import {
   getRoutines,
   getAllAdjustments,
 } from "@/lib/data";
+import { getTodayLocal } from "@/lib/periods";
 import { AdjustBuilder } from "@/components/admin/adjust/adjust-builder";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ export default async function AdminAdjustPage() {
         rooms={rooms}
         routines={routines}
         adjustments={adjustments}
+        initialDate={getTodayLocal()}
       />
     </div>
   );

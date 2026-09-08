@@ -8,6 +8,7 @@ import {
   getSetting,
 } from "@/lib/data";
 import type { Season } from "@/lib/constants";
+import { getTodayLocal } from "@/lib/periods";
 import { HomeContent } from "@/components/public/home-content";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,7 @@ export default async function HomePage() {
       routines={routines}
       adjustments={adjustments}
       season={(season as Season) ?? "summer"}
+      today={getTodayLocal()}
     />
   );
 }

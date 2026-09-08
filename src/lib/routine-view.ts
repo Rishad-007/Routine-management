@@ -9,6 +9,7 @@ import type {
   AdjustmentRow,
 } from "./types";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
+import { getSchoolDayIndex } from "./periods";
 
 export interface RoutineLookups {
   teachers: TeacherRow[];
@@ -22,9 +23,15 @@ interface AdjustOverride {
   newRoomId: string | null;
 }
 
+/** Parse "YYYY-MM-DD" into a LOCAL Date (avoids UTC-midnight ambiguity). */
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 /**
- * Build a map of today's effective overrides per section+period.
- * Returns Map<"sectionId:period", AdjustOverride>.
+ * Build a map of today's effective overrides per section+day+period.
+ * Returns Map<"sectionId:day:period", AdjustOverride>.
  */
 export function buildTodayOverrides(
   adjustments: AdjustmentRow[],
@@ -34,7 +41,9 @@ export function buildTodayOverrides(
   const map = new Map<string, AdjustOverride>();
   for (const a of adjustments) {
     if (a.adjust_date !== today || a.is_tag !== isTag) continue;
-    map.set(`${a.section_id}:${a.period_number}`, {
+    const dayIndex = getSchoolDayIndex(parseLocalDate(a.adjust_date));
+    if (dayIndex === null) continue;
+    map.set(`${a.section_id}:${dayIndex}:${a.period_number}`, {
       newTeacherId: a.new_teacher_id,
       newSubjectId: a.new_subject_id,
       newRoomId: a.new_room_id,
@@ -86,7 +95,7 @@ export function buildSectionMatrix(
     let roomId = primary.room_id;
     let isAdjusted = false;
 
-    const pOverride = todayOverrides?.get(`${sectionId}:${period}`);
+    const pOverride = todayOverrides?.get(`${sectionId}:${day}:${period}`);
     if (pOverride) {
       if (pOverride.newTeacherId) teacherId = pOverride.newTeacherId;
       if (pOverride.newSubjectId) subjectId = pOverride.newSubjectId;
@@ -100,7 +109,7 @@ export function buildSectionMatrix(
     const isTag = !!tag;
     let isTagAdjusted = false;
 
-    const tOverride = tagOverrides?.get(`${sectionId}:${period}`);
+    const tOverride = tagOverrides?.get(`${sectionId}:${day}:${period}`);
     if (tag && tOverride) {
       if (tOverride.newTeacherId) teacher2 = teacherName(tOverride.newTeacherId);
       if (tOverride.newSubjectId) subject2 = subjectShort(tOverride.newSubjectId);
@@ -154,11 +163,11 @@ export function buildTeacherMatrix(
     // Apply adjustments if today
     let effectiveClass = classLabel;
     if (!r.is_tag) {
-      const pOverride = todayOverrides?.get(`${r.section_id}:${r.period_number}`);
+      const pOverride = todayOverrides?.get(`${r.section_id}:${r.day}:${r.period_number}`);
       if (pOverride) effectiveClass = classLabel + " (adj)";
     }
     if (r.is_tag) {
-      const tOverride = tagOverrides?.get(`${r.section_id}:${r.period_number}`);
+      const tOverride = tagOverrides?.get(`${r.section_id}:${r.day}:${r.period_number}`);
       if (tOverride) effectiveClass = classLabel + " (tag adj)";
     }
 

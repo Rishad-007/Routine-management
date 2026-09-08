@@ -76,6 +76,7 @@ interface Props {
   rooms: RoomRow[];
   routines: RoutineRow[];
   adjustments: AdjustmentRow[];
+  initialDate?: string;
 }
 
 function toDateInput(d: Date) {
@@ -117,10 +118,11 @@ export function AdjustBuilder({
   rooms,
   routines,
   adjustments,
+  initialDate,
 }: Props) {
   const router = useRouter();
 
-  const [date, setDate] = useState(() => toDateInput(new Date()));
+  const [date, setDate] = useState(() => initialDate ?? toDateInput(new Date()));
   const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(
     null
   );
@@ -140,6 +142,9 @@ export function AdjustBuilder({
   const [pendingRed, setPendingRed] = useState<{
     adjustment: PeriodAdjustment;
     reasons: string[];
+  } | null>(null);
+  const [pendingYellow, setPendingYellow] = useState<{
+    detail: string;
   } | null>(null);
 
   const dayIndex = useMemo(
@@ -412,30 +417,16 @@ export function AdjustBuilder({
 
   const confirmRed = () => {
     if (!pendingRed) return;
-    const { adjustment } = pendingRed;
-    if (adjustment.isTag) {
-      setTagOverrides((prev) => ({
-        ...prev,
-        [adjustment.period]: {
-          ...prev[adjustment.period],
-          newTeacherId: adjustment.newTeacherId,
-        },
-      }));
-    } else {
-      setOverrides((prev) => ({
-        ...prev,
-        [adjustment.period]: {
-          newTeacherId: adjustment.newTeacherId,
-          sectionId: adjustment.sectionId,
-          reason: "",
-        },
-      }));
-    }
     setPendingRed(null);
+    setPendingYellow(null);
     setSheetOpen(false);
+    // The overrides are still in state — re-save immediately with force=true
+    // so the red-level assignment is actually persisted.
+    handleSave(true);
   };
 
   const resetCell = (period: number) => {
+    setPendingYellow(null);
     if (sheetTab === "tag") {
       setTagOverrides((prev) => {
         const next = { ...prev };
@@ -452,13 +443,18 @@ export function AdjustBuilder({
   };
 
   const resetAll = () => {
+    setPendingYellow(null);
     setOverrides({});
     setTagOverrides({});
   };
 
   const handleSave = async (force = false) => {
-    if (!selectedTeacherId || dayIndex === null) return;
+    if (!selectedTeacherId || dayIndex === null) {
+      toast.error("Select a teacher and a school day first.");
+      return;
+    }
     setSaving(true);
+    setPendingYellow(null);
 
     const changes: PeriodAdjustment[] = [];
 
@@ -500,8 +496,16 @@ export function AdjustBuilder({
       });
     }
 
+    // No actual substitutions to persist — bail out early with clear feedback.
+    if (changes.length === 0) {
+      setSaving(false);
+      toast.error("No changes to save.");
+      return;
+    }
+
     const res = await saveAllAdjustments(date, changes, force);
     setSaving(false);
+    setPendingYellow(null);
 
     if (res.error) {
       toast.error(res.error);
@@ -517,18 +521,19 @@ export function AdjustBuilder({
         });
         return;
       }
-      toast.warning(
-        `${res.warnings.length} warning(s). Review before saving.`,
-        {
-          duration: 8000,
-        }
-      );
+      const detail = res.warnings
+        .map((w) => `Period ${w.period}: ${w.reasons.join(", ")}`)
+        .join(" ");
+      // Keep a persistent banner (not just a dismissible toast) so the
+      // "Save anyway" action is always available until the user decides.
+      setPendingYellow({ detail });
       return;
     }
 
     toast.success(`Saved ${res.savedCount ?? 0} adjustment(s) for ${date}`);
     setOverrides({});
     setTagOverrides({});
+    setPendingYellow(null);
     router.refresh();
   };
 
@@ -562,7 +567,10 @@ export function AdjustBuilder({
           <Input
             type="date"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => {
+              setDate(e.target.value);
+              setPendingYellow(null);
+            }}
             className="w-44"
           />
         </div>
@@ -728,6 +736,41 @@ export function AdjustBuilder({
                     </div>
                   )}
                 </div>
+
+                {pendingYellow && (
+                  <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+                    <div className="flex gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                      <div className="text-sm text-amber-800">
+                        <p className="font-semibold">
+                          Minor workload warnings
+                        </p>
+                        <p>{pendingYellow.detail}</p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPendingYellow(null)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="bg-amber-600 text-white hover:bg-amber-700"
+                        disabled={saving}
+                        onClick={() => {
+                          setPendingYellow(null);
+                          handleSave(true);
+                        }}
+                      >
+                        <Save className="mr-1 h-3.5 w-3.5" />
+                        Save anyway
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="overflow-x-auto rounded-xl border bg-white shadow-sm">
                   <table className="w-full border-collapse text-base">
@@ -1141,11 +1184,9 @@ export function AdjustBuilder({
               Dangerous Assignment
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingRed?.reasons.map((r, i) => (
-                <p key={i} className="mb-1">
-                  • {r}
-                </p>
-              ))}
+              {pendingRed?.reasons
+                .map((r) => `• ${r}`)
+                .join("\n") || "This assignment is dangerous."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -28,7 +28,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { CurrentPeriodCard } from "./current-period-card";
 import { FadeIn } from "@/components/motion/fade-in";
 import { useCurrentPeriod } from "@/hooks/use-current-period";
-import { buildSchedule, getTodayLocal } from "@/lib/periods";
+import { buildSchedule } from "@/lib/periods";
 import { TIFFIN_AFTER_PERIOD } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import type { Season } from "@/lib/constants";
@@ -49,6 +49,7 @@ interface Props {
   routines: RoutineRow[];
   adjustments: AdjustmentRow[];
   season: Season;
+  today: string;
 }
 
 const initials = (name: string) =>
@@ -68,6 +69,7 @@ export function HomeContent({
   routines,
   adjustments,
   season,
+  today,
 }: Props) {
   const [classId, setClassId] = useState<string>("");
   const classSections = sections.filter((s) => s.class_id === classId);
@@ -88,7 +90,6 @@ export function HomeContent({
     );
     if (!r) return undefined;
 
-    const today = getTodayLocal();
     const adj = adjustments.find(
       (a) =>
         a.adjust_date === today &&
@@ -108,7 +109,7 @@ export function HomeContent({
       room: r.room_id ? "Room" : undefined,
       isAdjusted: !!adj,
     };
-  }, [sectionId, routines, teachers, subjects, result, dayIndex, adjustments]);
+  }, [sectionId, routines, teachers, subjects, result, dayIndex, adjustments, today]);
 
   const isWeekend = dayIndex === null;
   const activePeriod = result.kind === "period" ? result.periodNumber : null;

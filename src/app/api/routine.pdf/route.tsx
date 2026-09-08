@@ -9,7 +9,7 @@ import {
 } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT } from "@/lib/constants";
-import { getTodayLocal } from "@/lib/periods";
+import { getTodayLocal, getSchoolDayIndex } from "@/lib/periods";
 import type {
   SectionRow,
   RoutineRow,
@@ -123,6 +123,12 @@ async function getSectionRoutine(sectionId: string) {
 
   const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
 
+  // today's adjustments are already filtered in the query above; map the
+  // calendar date to its day-of-week index so only that day's cell is flagged.
+  const todayDay = getSchoolDayIndex(
+    new Date(getTodayLocal() + "T00:00:00")
+  );
+
   const matrix: Record<number, Record<number, { subject?: string; teacher?: string; room?: string; subject2?: string; teacher2?: string; room2?: string; isTag?: boolean; isAdjusted?: boolean }>> = {};
 
   // Group by day+period: primary + tag
@@ -150,7 +156,11 @@ async function getSectionRoutine(sectionId: string) {
     let isAdjusted = false;
 
     const adj = adjustments.find(
-      (a) => a.period_number === period && a.section_id === sectionId && !a.is_tag
+      (a) =>
+        a.period_number === period &&
+        a.section_id === sectionId &&
+        day === todayDay &&
+        !a.is_tag
     );
     if (adj) {
       if (adj.new_teacher_id) teacherId = adj.new_teacher_id;
@@ -166,7 +176,11 @@ async function getSectionRoutine(sectionId: string) {
 
     if (tag) {
       const tagAdj = adjustments.find(
-        (a) => a.period_number === period && a.section_id === sectionId && a.is_tag
+        (a) =>
+          a.period_number === period &&
+          a.section_id === sectionId &&
+          day === todayDay &&
+          a.is_tag
       );
       if (tagAdj) {
         if (tagAdj.new_teacher_id) teacher2 = teachers.get(tagAdj.new_teacher_id)?.short_name;
