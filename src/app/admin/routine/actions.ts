@@ -2,10 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
-import {
-  allTeacherLoads,
-  isTeacherBusy,
-} from "@/lib/conflicts";
+import { allTeacherLoads, isTeacherBusy } from "@/lib/conflicts";
 import type { RoutineRow } from "@/lib/types";
 
 export interface MatrixEdit {
@@ -32,20 +29,24 @@ export interface ConflictWarning {
 export async function saveSectionRoutine(
   sectionId: string,
   edits: MatrixEdit[],
-  force: boolean
+  force: boolean,
 ) {
   const { admin } = await authed();
   if (!sectionId) return { error: "Missing section." };
 
   const teacherNames = new Map<string, string>();
-  const { data: teachers, error: tErr } = await admin.from("teachers").select("id, short_name");
+  const { data: teachers, error: tErr } = await admin
+    .from("teachers")
+    .select("id, short_name");
   if (tErr) return { error: tErr.message };
   for (const t of teachers ?? []) teacherNames.set(t.id, t.short_name);
 
   // Existing routines for all sections (for conflict checks).
   const { data: allRoutines, error: rErr } = await admin
     .from("routines")
-    .select("id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag");
+    .select(
+      "id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag",
+    );
   if (rErr) return { error: rErr.message };
 
   // Build simulated routine set: other sections as-is + this section's new rows.
@@ -75,7 +76,7 @@ export async function saveSectionRoutine(
       e.teacherId,
       e.day,
       e.period,
-      `new-${edits.indexOf(e)}`
+      `new-${edits.indexOf(e)}`,
     );
     if (busy) {
       warnings.push({
@@ -119,9 +120,7 @@ export async function saveSectionRoutine(
     return {
       error:
         "Cannot save: " +
-        busyWarnings
-          .map((w) => `${w.teacherName} — ${w.detail}`)
-          .join("; ") +
+        busyWarnings.map((w) => `${w.teacherName} — ${w.detail}`).join("; ") +
         ". Free the teacher in that period first.",
     };
   }
@@ -131,23 +130,42 @@ export async function saveSectionRoutine(
   }
 
   // --- Persist ---
-  const { error: delErr } = await admin.from("routines").delete().eq("section_id", sectionId);
+  const { error: delErr } = await admin
+    .from("routine_slots")
+    .delete()
+    .eq("section_id", sectionId);
   if (delErr) return { error: delErr.message };
 
-  const insertRows = edits
-    .filter((e) => e.subjectId ?? e.teacherId ?? e.roomId)
-    .map((e) => ({
-      section_id: sectionId,
-      day: e.day,
-      period_number: e.period,
-      teacher_id: e.teacherId,
-      subject_id: e.subjectId,
-      room_id: e.roomId,
-      is_tag: e.isTag,
-    }));
+  const filledEdits = edits.filter(
+    (e) => e.subjectId ?? e.teacherId ?? e.roomId,
+  );
+  const slotKeys = new Set(filledEdits.map((e) => `${e.day}:${e.period}`));
+  const { data: slots, error: slotErr } = await admin
+    .from("routine_slots")
+    .insert(
+      [...slotKeys].map((key) => {
+        const [day, period] = key.split(":").map(Number);
+        return { section_id: sectionId, day, period_number: period };
+      }),
+    )
+    .select("id, day, period_number");
+  if (slotErr) return { error: slotErr.message };
+
+  const slotByKey = new Map(
+    (slots ?? []).map((slot) => [`${slot.day}:${slot.period_number}`, slot.id]),
+  );
+  const insertRows = filledEdits.map((e) => ({
+    slot_id: slotByKey.get(`${e.day}:${e.period}`),
+    assignment_role: e.isTag ? "tag" : "primary",
+    teacher_id: e.teacherId,
+    subject_id: e.subjectId,
+    room_id: e.roomId,
+  }));
 
   if (insertRows.length > 0) {
-    const { error: insErr } = await admin.from("routines").insert(insertRows);
+    const { error: insErr } = await admin
+      .from("routine_assignments")
+      .insert(insertRows);
     if (insErr) return { error: insErr.message };
   }
 
@@ -155,5 +173,9 @@ export async function saveSectionRoutine(
   revalidatePath("/");
   revalidatePath("/routine");
   revalidatePath("/teacher");
-  return { success: true, savedCount: insertRows.length, warnings: uniqueWarnings };
+  return {
+    success: true,
+    savedCount: insertRows.length,
+    warnings: uniqueWarnings,
+  };
 }

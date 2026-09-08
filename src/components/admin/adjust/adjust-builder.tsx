@@ -23,6 +23,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -39,6 +46,7 @@ import {
   BookOpen,
   FileText,
   Loader2,
+  Eye,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -122,16 +130,21 @@ export function AdjustBuilder({
 }: Props) {
   const router = useRouter();
 
-  const [date, setDate] = useState(() => initialDate ?? toDateInput(new Date()));
+  const [date, setDate] = useState(
+    () => initialDate ?? toDateInput(new Date()),
+  );
   const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(
-    null
+    null,
   );
   const [overrides, setOverrides] = useState<
-    Record<number, { newTeacherId: string | null; sectionId: string; reason: string }>
+    Record<
+      number,
+      { newTeacherId: string | null; sectionId: string; reason: string }
+    >
   >({});
-  const [tagOverrides, setTagOverrides] = useState<
-    Record<number, TagOverride>
-  >({});
+  const [tagOverrides, setTagOverrides] = useState<Record<number, TagOverride>>(
+    {},
+  );
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetPeriod, setSheetPeriod] = useState<number | null>(null);
   const [sheetTab, setSheetTab] = useState<"primary" | "tag">("primary");
@@ -146,10 +159,11 @@ export function AdjustBuilder({
   const [pendingYellow, setPendingYellow] = useState<{
     detail: string;
   } | null>(null);
+  const [routineTeacherId, setRoutineTeacherId] = useState<string | null>(null);
 
   const dayIndex = useMemo(
     () => getSchoolDayIndex(new Date(date + "T00:00:00")),
-    [date]
+    [date],
   );
   const isNoSchool = dayIndex === null;
 
@@ -157,23 +171,123 @@ export function AdjustBuilder({
   // but not editable. Future/today dates remain editable.
   const isPastDate = useMemo(
     () => (date ? date < getTodayLocal() : false),
-    [date]
+    [date],
   );
 
   const subjectMap = useMemo(
     () => new Map(subjects.map((s) => [s.id, s])),
-    [subjects]
+    [subjects],
   );
 
   const selectedTeacher = useMemo(
     () => teachers.find((t) => t.id === selectedTeacherId) ?? null,
-    [teachers, selectedTeacherId]
+    [teachers, selectedTeacherId],
   );
+
+  const routineTeacher = useMemo(
+    () => teachers.find((teacher) => teacher.id === routineTeacherId) ?? null,
+    [teachers, routineTeacherId],
+  );
+
+  const routinePreview = useMemo(() => {
+    if (!routineTeacherId) return null;
+
+    const cells = new Map<
+      string,
+      {
+        period: number;
+        subject: string;
+        classLabel: string;
+        room: string;
+        isTag: boolean;
+        continuous: number;
+      }
+    >();
+
+    for (const day of DAY_LABEL_LIST.map((_, index) => index)) {
+      const teacherPeriods = new Set(
+        routines
+          .filter(
+            (routine) =>
+              routine.teacher_id === routineTeacherId && routine.day === day,
+          )
+          .map((routine) => routine.period_number),
+      );
+
+      for (const period of PERIOD_ORDER) {
+        const routine = routines.find(
+          (item) =>
+            item.teacher_id === routineTeacherId &&
+            item.day === day &&
+            item.period_number === period,
+        );
+        if (!routine) continue;
+
+        let continuous = 1;
+        for (
+          let previous = period - 1;
+          teacherPeriods.has(previous) && previous !== TIFFIN_AFTER_PERIOD;
+          previous -= 1
+        ) {
+          continuous += 1;
+        }
+        for (
+          let next = period + 1;
+          teacherPeriods.has(next) && period !== TIFFIN_AFTER_PERIOD;
+          next += 1
+        ) {
+          continuous += 1;
+        }
+
+        const section = sections.find((item) => item.id === routine.section_id);
+        const classRow = section
+          ? classes.find((item) => item.id === section.class_id)
+          : undefined;
+        const subject = routine.subject_id
+          ? subjectMap.get(routine.subject_id)
+          : undefined;
+        const room = routine.room_id
+          ? rooms.find((item) => item.id === routine.room_id)
+          : undefined;
+        cells.set(`${day}:${period}`, {
+          period,
+          subject: subject?.short_name ?? subject?.name ?? "—",
+          classLabel:
+            section && classRow ? `${classRow.name}-${section.name}` : "—",
+          room: room?.name ?? "—",
+          isTag: routine.is_tag,
+          continuous,
+        });
+      }
+    }
+
+    const daily = DAY_LABEL_LIST.map((_, day) => {
+      const periods = PERIOD_ORDER.filter((period) =>
+        cells.has(`${day}:${period}`),
+      );
+      return {
+        count: periods.length,
+        continuous: Math.max(
+          0,
+          ...periods.map(
+            (period) => cells.get(`${day}:${period}`)?.continuous ?? 0,
+          ),
+        ),
+      };
+    });
+
+    return {
+      cells,
+      daily,
+      total: daily.reduce((sum, item) => sum + item.count, 0),
+      longest: Math.max(0, ...daily.map((item) => item.continuous)),
+    };
+  }, [routineTeacherId, routines, sections, classes, subjectMap, rooms]);
 
   const dayRoutines = useMemo(() => {
     if (!selectedTeacherId || dayIndex === null) return [];
     return routines.filter(
-      (r) => r.teacher_id === selectedTeacherId && r.day === dayIndex
+      (r) => r.teacher_id === selectedTeacherId && r.day === dayIndex,
     );
   }, [routines, selectedTeacherId, dayIndex]);
 
@@ -182,13 +296,11 @@ export function AdjustBuilder({
     const cells: DayCell[] = [];
     for (const p of PERIOD_ORDER) {
       const primary = dayRoutines.find(
-        (x) => x.period_number === p && !x.is_tag
+        (x) => x.period_number === p && !x.is_tag,
       );
       if (!primary) continue;
 
-      const tag = dayRoutines.find(
-        (x) => x.period_number === p && x.is_tag
-      );
+      const tag = dayRoutines.find((x) => x.period_number === p && x.is_tag);
       const subject = primary.subject_id
         ? subjectMap.get(primary.subject_id)
         : undefined;
@@ -196,16 +308,14 @@ export function AdjustBuilder({
         const s = sections.find((x) => x.id === primary.section_id);
         return s && c.id === s.class_id;
       });
-      const sectionRow = sections.find(
-        (x) => x.id === primary.section_id
-      );
+      const sectionRow = sections.find((x) => x.id === primary.section_id);
 
       const existingPrimaryAdj = adjustments.find(
         (a) =>
           a.adjust_date === date &&
           a.section_id === primary.section_id &&
           a.period_number === p &&
-          !a.is_tag
+          !a.is_tag,
       );
 
       const existingTagAdj = tag
@@ -214,7 +324,7 @@ export function AdjustBuilder({
               a.adjust_date === date &&
               a.section_id === tag.section_id &&
               a.period_number === p &&
-              a.is_tag
+              a.is_tag,
           )
         : null;
 
@@ -222,12 +332,12 @@ export function AdjustBuilder({
       const tagOv = tagOverrides[p];
 
       const effectiveTeacherId = override
-        ? override.newTeacherId ?? ""
-        : existingPrimaryAdj?.new_teacher_id ?? "";
+        ? (override.newTeacherId ?? "")
+        : (existingPrimaryAdj?.new_teacher_id ?? "");
 
       const tagEffectiveTeacherId = tagOv
-        ? tagOv.newTeacherId ?? ""
-        : existingTagAdj?.new_teacher_id ?? "";
+        ? (tagOv.newTeacherId ?? "")
+        : (existingTagAdj?.new_teacher_id ?? "");
       const tagEffectiveSubjectName = tagOv?.newSubjectId
         ? subjectMap.get(tagOv.newSubjectId)?.name
         : existingTagAdj?.new_subject_id
@@ -275,7 +385,7 @@ export function AdjustBuilder({
       (t) =>
         t.short_name.toLowerCase().includes(q) ||
         t.teacher_code.toLowerCase().includes(q) ||
-        t.id.toLowerCase().includes(q)
+        t.id.toLowerCase().includes(q),
     );
   }, [teachers, teacherSearch]);
 
@@ -291,10 +401,7 @@ export function AdjustBuilder({
   // Per-teacher stats for the active day: class count + longest continuous
   // stretch. Used by the teacher rail and the assignment sheet.
   const teacherDayStats = useMemo(() => {
-    const map = new Map<
-      string,
-      { count: number; stretch: number }
-    >();
+    const map = new Map<string, { count: number; stretch: number }>();
     if (dayIndex === null) return map;
     for (const t of teachers) {
       map.set(t.id, {
@@ -315,7 +422,11 @@ export function AdjustBuilder({
         const busy = isTeacherBusy(routines, t.id, dayIndex, sheetPeriod);
         return { ...t, dayCount, stretch, weekTotal: week.total, busy };
       })
-      .sort((a, b) => Number(a.busy) - Number(b.busy) || a.short_name.localeCompare(b.short_name));
+      .sort(
+        (a, b) =>
+          Number(a.busy) - Number(b.busy) ||
+          a.short_name.localeCompare(b.short_name),
+      );
   }, [teachers, routines, dayIndex, sheetPeriod]);
 
   const filteredFreeTeachers = useMemo(() => {
@@ -324,11 +435,14 @@ export function AdjustBuilder({
     return freeTeachersForSheet.filter(
       (t) =>
         t.short_name.toLowerCase().includes(q) ||
-        t.teacher_code.toLowerCase().includes(q)
+        t.teacher_code.toLowerCase().includes(q),
     );
   }, [freeTeachersForSheet, sheetSearch]);
 
-  const handleCellClick = (period: number, tab: "primary" | "tag" = "primary") => {
+  const handleCellClick = (
+    period: number,
+    tab: "primary" | "tag" = "primary",
+  ) => {
     if (isPastDate) return; // historical dates are read-only
     setSheetPeriod(period);
     setSheetTab(tab);
@@ -355,14 +469,14 @@ export function AdjustBuilder({
       newTeacherId,
       dayIndex!,
       period,
-      cell.sectionId
+      cell.sectionId,
     );
 
     // HARD BLOCK: the substitute is already teaching another class at this
     // day+period. This is a double-booking and cannot be force-approved.
     if (isTeacherBusy(routines, newTeacherId, dayIndex!, period)) {
       toast.error(
-        "This teacher already has a class in another section at this period. Free them first before assigning."
+        "This teacher already has a class in another section at this period. Free them first before assigning.",
       );
       return;
     }
@@ -538,8 +652,7 @@ export function AdjustBuilder({
   };
 
   const hasChanges =
-    Object.keys(overrides).length > 0 ||
-    Object.keys(tagOverrides).length > 0;
+    Object.keys(overrides).length > 0 || Object.keys(tagOverrides).length > 0;
 
   const downloadReport = () => {
     if (!date || dayIndex === null) return;
@@ -561,9 +674,7 @@ export function AdjustBuilder({
       {/* Date selector */}
       <div className="flex flex-wrap items-end gap-4 rounded-xl border bg-white p-4 shadow-sm">
         <div className="space-y-1">
-          <p className="text-xs font-medium text-slate-500">
-            Adjustment date
-          </p>
+          <p className="text-xs font-medium text-slate-500">Adjustment date</p>
           <Input
             type="date"
             value={date}
@@ -651,7 +762,7 @@ export function AdjustBuilder({
                       "w-full px-3 py-2.5 text-left text-sm transition-colors border-b last:border-b-0",
                       isSelected
                         ? "bg-[#0d9488]/10 text-[#0b7a70]"
-                        : "hover:bg-slate-50"
+                        : "hover:bg-slate-50",
                     )}
                   >
                     <div className="flex items-center justify-between">
@@ -667,14 +778,13 @@ export function AdjustBuilder({
                               ? "bg-amber-100 text-amber-700"
                               : dayCount >= 3
                                 ? "bg-slate-100 text-slate-600"
-                                : "bg-emerald-100 text-emerald-700"
+                                : "bg-emerald-100 text-emerald-700",
                         )}
                         title={`${dayCount} classes today${
                           stretch >= 1 ? ` · ${stretch} continuous` : ""
                         }`}
                       >
-                        {dayCount}P
-                        {stretch >= 3 ? ` ·${stretch}cont` : ""}
+                        {dayCount}P{stretch >= 3 ? ` ·${stretch}cont` : ""}
                       </span>
                     </div>
                     <div className="mt-0.5 flex items-center justify-between text-xs text-slate-500">
@@ -712,11 +822,7 @@ export function AdjustBuilder({
                   </div>
                   {hasChanges && !isPastDate && (
                     <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={resetAll}
-                      >
+                      <Button variant="outline" size="sm" onClick={resetAll}>
                         <RotateCcw className="mr-1 h-3.5 w-3.5" />
                         Reset all
                       </Button>
@@ -742,9 +848,7 @@ export function AdjustBuilder({
                     <div className="flex gap-2">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                       <div className="text-sm text-amber-800">
-                        <p className="font-semibold">
-                          Minor workload warnings
-                        </p>
+                        <p className="font-semibold">Minor workload warnings</p>
                         <p>{pendingYellow.detail}</p>
                       </div>
                     </div>
@@ -798,12 +902,11 @@ export function AdjustBuilder({
                         const override = overrides[cell.period];
                         const hasOverride = !!override;
                         const effectiveName = override
-                          ? teachers.find(
-                              (t) => t.id === override.newTeacherId
-                            )?.short_name
+                          ? teachers.find((t) => t.id === override.newTeacherId)
+                              ?.short_name
                           : cell.effectiveTeacherId
                             ? teachers.find(
-                                (t) => t.id === cell.effectiveTeacherId
+                                (t) => t.id === cell.effectiveTeacherId,
                               )?.short_name
                             : null;
 
@@ -818,8 +921,7 @@ export function AdjustBuilder({
                             key={cell.period}
                             className={cn(
                               "transition-colors",
-                              (hasOverride || hasTagOverride) &&
-                                "bg-amber-50"
+                              (hasOverride || hasTagOverride) && "bg-amber-50",
                             )}
                           >
                             <td className="border border-slate-200 px-2 py-2 text-center text-sm font-bold text-slate-600">
@@ -843,8 +945,7 @@ export function AdjustBuilder({
                                 </span>
                                 <span className="ml-1 text-sm text-slate-500">
                                   ·{" "}
-                                  {effectiveName ??
-                                    selectedTeacher.short_name}
+                                  {effectiveName ?? selectedTeacher.short_name}
                                 </span>
                                 {(hasOverride || cell.isAdjusted) && (
                                   <Badge
@@ -863,7 +964,10 @@ export function AdjustBuilder({
                                   </span>
                                   <span className="ml-1 text-sm text-teal-600">
                                     ·{" "}
-                                    {teachers.find((t) => t.id === cell.tagEffectiveTeacherId)?.short_name || "—"}
+                                    {teachers.find(
+                                      (t) =>
+                                        t.id === cell.tagEffectiveTeacherId,
+                                    )?.short_name || "—"}
                                   </span>
                                   {cell.isTagAdjusted && (
                                     <Badge
@@ -908,10 +1012,7 @@ export function AdjustBuilder({
                                   variant="ghost"
                                   size="sm"
                                   onClick={() =>
-                                    handleCellClick(
-                                      cell.period,
-                                      "primary"
-                                    )
+                                    handleCellClick(cell.period, "primary")
                                   }
                                   disabled={isPastDate}
                                   className="h-8 text-sm"
@@ -923,10 +1024,7 @@ export function AdjustBuilder({
                                     variant="ghost"
                                     size="sm"
                                     onClick={() =>
-                                      handleCellClick(
-                                        cell.period,
-                                        "tag"
-                                      )
+                                      handleCellClick(cell.period, "tag")
                                     }
                                     disabled={isPastDate}
                                     className="h-8 text-sm text-teal-600"
@@ -948,6 +1046,132 @@ export function AdjustBuilder({
         </div>
       )}
 
+      {/* Weekly routine preview for a candidate teacher */}
+      <Dialog
+        open={!!routineTeacher}
+        onOpenChange={(open) => !open && setRoutineTeacherId(null)}
+      >
+        <DialogContent className="flex h-[min(92vh,900px)] max-h-[92vh] w-[99vw] max-w-[1800px] flex-col gap-3 overflow-hidden p-5 sm:aspect-auto sm:h-[min(92vh,900px)]">
+          {routineTeacher && routinePreview && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="text-[#1e3a5f]">
+                  {routineTeacher.short_name}&apos;s routine
+                </DialogTitle>
+                <DialogDescription>
+                  {routineTeacher.teacher_code} · Weekly base routine.
+                  Continuous classes are highlighted; tiffin separates the runs.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
+                <table className="h-full w-full min-w-[1050px] border-collapse text-sm">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 z-10 border border-slate-200 bg-[#1e3a5f] px-3 py-3 text-left text-white">
+                        Day
+                      </th>
+                      {PERIOD_ORDER.map((period) => (
+                        <th
+                          key={period}
+                          className={cn(
+                            "border border-slate-200 px-3 py-3 text-center text-slate-600",
+                            period === TIFFIN_AFTER_PERIOD &&
+                              "border-r-2 border-r-amber-300",
+                          )}
+                        >
+                          P{period}
+                          {period === TIFFIN_AFTER_PERIOD && (
+                            <span className="block text-[10px] font-normal text-amber-600">
+                              Tiffin
+                            </span>
+                          )}
+                        </th>
+                      ))}
+                      <th className="border border-slate-200 bg-slate-50 px-3 py-3 text-center text-slate-600">
+                        Total
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DAY_LABEL_LIST.map((day, dayNumber) => {
+                      const daily = routinePreview.daily[dayNumber];
+                      return (
+                        <tr key={day}>
+                          <td className="sticky left-0 z-10 border border-slate-200 bg-slate-50 px-3 py-3 font-semibold text-slate-700">
+                            {day}
+                          </td>
+                          {PERIOD_ORDER.map((period) => {
+                            const cell = routinePreview.cells.get(
+                              `${dayNumber}:${period}`,
+                            );
+                            const isContinuous = (cell?.continuous ?? 0) >= 2;
+                            return (
+                              <td
+                                key={period}
+                                className={cn(
+                                  "border border-slate-200 px-2 py-3 text-center align-top",
+                                  period === TIFFIN_AFTER_PERIOD &&
+                                    "border-r-2 border-r-amber-300",
+                                  isContinuous && "bg-amber-50",
+                                  (cell?.continuous ?? 0) >= 3 &&
+                                    "bg-orange-100",
+                                )}
+                              >
+                                {cell ? (
+                                  <div className="space-y-0.5">
+                                    <p className="font-semibold text-[#1e3a5f]">
+                                      {cell.classLabel}
+                                    </p>
+                                    <p className="text-slate-600">
+                                      {cell.subject}
+                                      {cell.isTag && " · Tag"}
+                                    </p>
+                                    <p className="text-xs text-slate-400">
+                                      {cell.room}
+                                    </p>
+                                    {isContinuous && (
+                                      <Badge className="bg-amber-200 px-1 py-0 text-[9px] text-amber-900">
+                                        {cell.continuous} continuous
+                                      </Badge>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-200">·</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="border border-slate-200 bg-slate-50 px-3 py-3 text-center font-semibold text-slate-700">
+                            {daily.count}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-slate-50 px-3 py-2 text-sm">
+                <span className="font-semibold text-[#1e3a5f]">
+                  Weekly total: {routinePreview.total} classes
+                </span>
+                <span className="text-slate-600">
+                  Selected day:{" "}
+                  {routinePreview.daily[dayIndex ?? 0]?.count ?? 0} classes
+                </span>
+                <span className="font-medium text-amber-700">
+                  Longest continuous: {routinePreview.longest} periods
+                </span>
+                <span className="text-teal-700">
+                  Tiffin separates continuous runs
+                </span>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Teacher assignment sheet */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="right" className="w-full sm:max-w-sm">
@@ -960,7 +1184,7 @@ export function AdjustBuilder({
             <SheetDescription>
               {sheetTab === "tag"
                 ? "Select a free teacher for the tag session. Overrides subject/room too."
-                : "Pick a free teacher for this period. Busy teachers are shown for reference; load, continuous stretch and \"already 4/5 classes\" help you choose."}
+                : 'Pick a free teacher for this period. Busy teachers are shown for reference; load, continuous stretch and "already 4/5 classes" help you choose.'}
             </SheetDescription>
           </SheetHeader>
 
@@ -968,11 +1192,13 @@ export function AdjustBuilder({
           {sheetTab === "tag" && sheetPeriod && (
             <div className="space-y-3 px-4 pt-2">
               <div className="space-y-1">
-                <p className="text-xs font-medium text-teal-600">
-                  Tag Subject
-                </p>
+                <p className="text-xs font-medium text-teal-600">Tag Subject</p>
                 <Select
-                  value={currentTagOverride?.newSubjectId ?? currentSheetCell?.tagSubjectId ?? "none"}
+                  value={
+                    currentTagOverride?.newSubjectId ??
+                    currentSheetCell?.tagSubjectId ??
+                    "none"
+                  }
                   onValueChange={(v) => {
                     if (!sheetPeriod) return;
                     setTagOverrides((prev) => ({
@@ -983,7 +1209,10 @@ export function AdjustBuilder({
                       },
                     }));
                   }}
-                  items={[{ value: "none", label: "— Same —" }, ...subjects.map(s => ({ value: s.id, label: s.name }))]}
+                  items={[
+                    { value: "none", label: "— Same —" },
+                    ...subjects.map((s) => ({ value: s.id, label: s.name })),
+                  ]}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select subject" />
@@ -999,11 +1228,13 @@ export function AdjustBuilder({
                 </Select>
               </div>
               <div className="space-y-1">
-                <p className="text-xs font-medium text-teal-600">
-                  Tag Room
-                </p>
+                <p className="text-xs font-medium text-teal-600">Tag Room</p>
                 <Select
-                  value={currentTagOverride?.newRoomId ?? currentSheetCell?.tagRoomId ?? "none"}
+                  value={
+                    currentTagOverride?.newRoomId ??
+                    currentSheetCell?.tagRoomId ??
+                    "none"
+                  }
                   onValueChange={(v) => {
                     if (!sheetPeriod) return;
                     setTagOverrides((prev) => ({
@@ -1014,7 +1245,10 @@ export function AdjustBuilder({
                       },
                     }));
                   }}
-                  items={[{ value: "none", label: "— Same —" }, ...rooms.map(r => ({ value: r.id, label: r.name }))]}
+                  items={[
+                    { value: "none", label: "— Same —" },
+                    ...rooms.map((r) => ({ value: r.id, label: r.name })),
+                  ]}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select room" />
@@ -1051,11 +1285,19 @@ export function AdjustBuilder({
             <div className="mb-3 flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2 text-sm">
               <span className="text-slate-600">
                 <strong className="text-emerald-700">
-                  {freeTeachersForSheet.filter((t) => !t.busy || t.id === selectedTeacherId).length}
+                  {
+                    freeTeachersForSheet.filter(
+                      (t) => !t.busy || t.id === selectedTeacherId,
+                    ).length
+                  }
                 </strong>{" "}
                 available /{" "}
                 <strong className="text-slate-800">
-                  {freeTeachersForSheet.filter((t) => t.busy && t.id !== selectedTeacherId).length}
+                  {
+                    freeTeachersForSheet.filter(
+                      (t) => t.busy && t.id !== selectedTeacherId,
+                    ).length
+                  }
                 </strong>{" "}
                 busy in P{sheetPeriod}
               </span>
@@ -1076,8 +1318,7 @@ export function AdjustBuilder({
                     t.id,
                     dayIndex!,
                     sheetPeriod!,
-                    dayCells.find((c) => c.period === sheetPeriod)
-                      ?.sectionId
+                    dayCells.find((c) => c.period === sheetPeriod)?.sectionId,
                   );
                   const levelColor =
                     sim.level === "red"
@@ -1087,63 +1328,87 @@ export function AdjustBuilder({
                         : "border-slate-200 bg-white";
 
                   return (
-                    <button
+                    <div
                       key={t.id}
-                      disabled={t.busy}
-                      onClick={() =>
-                        sheetTab === "tag"
-                          ? handleAssignTag(sheetPeriod!, t.id)
-                          : handleAssignPrimary(sheetPeriod!, t.id)
-                      }
                       className={cn(
-                        "w-full rounded-lg border p-3 text-left transition-colors",
+                        "flex w-full items-start gap-2 rounded-lg border p-3 transition-colors",
                         t.busy
                           ? "cursor-not-allowed opacity-60"
                           : "hover:border-[#0d9488] hover:bg-[#0d9488]/5",
-                        levelColor
+                        levelColor,
                       )}
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-1.5 font-medium text-slate-800">
-                          {t.short_name}
-                          {t.busy ? (
-                            <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
-                              busy
+                      <button
+                        type="button"
+                        disabled={t.busy}
+                        onClick={() =>
+                          sheetTab === "tag"
+                            ? handleAssignTag(sheetPeriod!, t.id)
+                            : handleAssignPrimary(sheetPeriod!, t.id)
+                        }
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="flex items-center gap-1.5 font-medium text-slate-800">
+                            {t.short_name}
+                            {t.busy ? (
+                              <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+                                busy
+                              </span>
+                            ) : (
+                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                                free
+                              </span>
+                            )}
+                          </span>
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span>{t.dayCount}P day</span>
+                            <span>·</span>
+                            <span>
+                              {t.stretch >= 3 ? `${t.stretch} cont` : "—"}
                             </span>
-                          ) : (
-                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                              free
+                            <span>·</span>
+                            <span>{t.weekTotal}P wk</span>
+                          </div>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                          <span className="text-slate-400">
+                            {t.teacher_code}
+                          </span>
+                          {t.dayCount >= 5 && (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
+                              already {t.dayCount} classes today
                             </span>
                           )}
-                        </span>
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
-                          <span>{t.dayCount}P day</span>
-                          <span>·</span>
-                          <span>{t.stretch >= 3 ? `${t.stretch} cont` : "—"}</span>
-                          <span>·</span>
-                          <span>{t.weekTotal}P wk</span>
+                          {t.stretch >= 3 && (
+                            <span className="rounded bg-orange-100 px-1.5 py-0.5 font-medium text-orange-700">
+                              {t.stretch} continuous
+                            </span>
+                          )}
+                          {sim.level === "yellow" && (
+                            <span className="text-amber-600">
+                              ⚠ {sim.reasons.join("; ")}
+                            </span>
+                          )}
+                          {sim.level === "red" && (
+                            <span className="text-red-600">
+                              ✖ {sim.reasons.join("; ")}
+                            </span>
+                          )}
                         </div>
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
-                        <span className="text-slate-400">{t.teacher_code}</span>
-                        {t.dayCount >= 5 && (
-                          <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
-                            already {t.dayCount} classes today
-                          </span>
-                        )}
-                        {t.stretch >= 3 && (
-                          <span className="rounded bg-orange-100 px-1.5 py-0.5 font-medium text-orange-700">
-                            {t.stretch} continuous
-                          </span>
-                        )}
-                        {sim.level === "yellow" && (
-                          <span className="text-amber-600">⚠ {sim.reasons.join("; ")}</span>
-                        )}
-                        {sim.level === "red" && (
-                          <span className="text-red-600">✖ {sim.reasons.join("; ")}</span>
-                        )}
-                      </div>
-                    </button>
+                      </button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        title={`View ${t.short_name}'s routine`}
+                        aria-label={`View ${t.short_name}'s routine`}
+                        onClick={() => setRoutineTeacherId(t.id)}
+                        className="shrink-0"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </div>
                   );
                 })
               )}
@@ -1184,9 +1449,8 @@ export function AdjustBuilder({
               Dangerous Assignment
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingRed?.reasons
-                .map((r) => `• ${r}`)
-                .join("\n") || "This assignment is dangerous."}
+              {pendingRed?.reasons.map((r) => `• ${r}`).join("\n") ||
+                "This assignment is dangerous."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

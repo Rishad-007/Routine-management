@@ -3,10 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import { simulateTeacherAssignment } from "@/lib/conflicts";
-import {
-  getSchoolDayIndex,
-  resolveAdjustDate,
-} from "@/lib/periods";
+import { getSchoolDayIndex, resolveAdjustDate } from "@/lib/periods";
 import type { RoutineRow } from "@/lib/types";
 
 export interface PeriodAdjustment {
@@ -32,7 +29,7 @@ export interface PeriodAdjustment {
 export async function saveDayAdjustments(
   adjustDate: string,
   sectionId: string,
-  changes: PeriodAdjustment[]
+  changes: PeriodAdjustment[],
 ) {
   const { admin } = await authed();
   const effectiveDate = resolveAdjustDate(adjustDate);
@@ -40,7 +37,7 @@ export async function saveDayAdjustments(
     return { error: "Date and section are required." };
 
   const { error: delErr } = await admin
-    .from("adjustments")
+    .from("adjustment_batches")
     .delete()
     .eq("adjust_date", effectiveDate)
     .eq("section_id", sectionId);
@@ -49,10 +46,8 @@ export async function saveDayAdjustments(
   const insertRows = changes
     .filter((c) => c.newTeacherId || c.newSubjectId || c.newRoomId)
     .map((c) => ({
-      adjust_date: effectiveDate,
-      section_id: sectionId,
       period_number: c.period,
-      is_tag: c.isTag,
+      assignment_role: c.isTag ? "tag" : "primary",
       original_teacher_id: c.originalTeacherId,
       new_teacher_id: c.newTeacherId,
       original_subject_id: c.originalSubjectId,
@@ -60,11 +55,22 @@ export async function saveDayAdjustments(
       original_room_id: c.originalRoomId,
       new_room_id: c.newRoomId,
       reason: c.reason ?? null,
-      created_by: null,
     }));
 
   if (insertRows.length > 0) {
-    const { error: insErr } = await admin.from("adjustments").insert(insertRows);
+    const { data: batch, error: batchErr } = await admin
+      .from("adjustment_batches")
+      .insert({
+        adjust_date: effectiveDate,
+        section_id: sectionId,
+        created_by: null,
+      })
+      .select("id")
+      .single();
+    if (batchErr) return { error: batchErr.message };
+    const { error: insErr } = await admin
+      .from("adjustment_assignments")
+      .insert(insertRows.map((row) => ({ ...row, batch_id: batch.id })));
     if (insErr) return { error: insErr.message };
   }
 
@@ -80,21 +86,21 @@ export async function saveDayAdjustments(
 export async function saveAllAdjustments(
   adjustDate: string,
   changes: PeriodAdjustment[],
-  force: boolean
+  force: boolean,
 ) {
   const { admin } = await authed();
   const effectiveDate = resolveAdjustDate(adjustDate);
   if (!effectiveDate) return { error: "Date is required." };
 
-  const dayIndex = getSchoolDayIndex(
-    new Date(effectiveDate + "T00:00:00")
-  );
+  const dayIndex = getSchoolDayIndex(new Date(effectiveDate + "T00:00:00"));
   if (dayIndex === null) return { error: "Cannot adjust on a weekend." };
 
   // Fetch all routines for conflict validation.
   const { data: allRoutines, error: rErr } = await admin
     .from("routines")
-    .select("id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag, is_adjusted, original_teacher_id");
+    .select(
+      "id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag, is_adjusted, original_teacher_id",
+    );
   if (rErr) return { error: rErr.message };
 
   const routines = (allRoutines ?? []) as RoutineRow[];
@@ -108,7 +114,7 @@ export async function saveAllAdjustments(
         r.day === dayIndex &&
         r.period_number === c.period &&
         r.teacher_id === c.newTeacherId &&
-        r.section_id !== c.sectionId
+        r.section_id !== c.sectionId,
     );
     if (busy) {
       return {
@@ -119,7 +125,12 @@ export async function saveAllAdjustments(
   }
 
   // Server-side validation of each adjustment.
-  const warnings: { period: number; sectionId: string; level: "yellow" | "red"; reasons: string[] }[] = [];
+  const warnings: {
+    period: number;
+    sectionId: string;
+    level: "yellow" | "red";
+    reasons: string[];
+  }[] = [];
 
   for (const c of changes) {
     if (!c.newTeacherId) continue;
@@ -128,12 +139,22 @@ export async function saveAllAdjustments(
       c.newTeacherId,
       dayIndex,
       c.period,
-      c.sectionId
+      c.sectionId,
     );
     if (sim.level === "yellow") {
-      warnings.push({ period: c.period, sectionId: c.sectionId, level: "yellow", reasons: sim.reasons });
+      warnings.push({
+        period: c.period,
+        sectionId: c.sectionId,
+        level: "yellow",
+        reasons: sim.reasons,
+      });
     } else if (sim.level === "red") {
-      warnings.push({ period: c.period, sectionId: c.sectionId, level: "red", reasons: sim.reasons });
+      warnings.push({
+        period: c.period,
+        sectionId: c.sectionId,
+        level: "red",
+        reasons: sim.reasons,
+      });
     }
   }
 
@@ -151,7 +172,7 @@ export async function saveAllAdjustments(
   let savedCount = 0;
   for (const [sectionId, sectionChanges] of bySection) {
     const { error: delErr } = await admin
-      .from("adjustments")
+      .from("adjustment_batches")
       .delete()
       .eq("adjust_date", effectiveDate)
       .eq("section_id", sectionId);
@@ -160,10 +181,8 @@ export async function saveAllAdjustments(
     const insertRows = sectionChanges
       .filter((c) => c.newTeacherId || c.newSubjectId || c.newRoomId)
       .map((c) => ({
-        adjust_date: effectiveDate,
-        section_id: sectionId,
         period_number: c.period,
-        is_tag: c.isTag,
+        assignment_role: c.isTag ? "tag" : "primary",
         original_teacher_id: c.originalTeacherId,
         new_teacher_id: c.newTeacherId,
         original_subject_id: c.originalSubjectId,
@@ -171,11 +190,22 @@ export async function saveAllAdjustments(
         original_room_id: c.originalRoomId,
         new_room_id: c.newRoomId,
         reason: c.reason ?? null,
-        created_by: null,
       }));
 
     if (insertRows.length > 0) {
-      const { error: insErr } = await admin.from("adjustments").insert(insertRows);
+      const { data: batch, error: batchErr } = await admin
+        .from("adjustment_batches")
+        .insert({
+          adjust_date: effectiveDate,
+          section_id: sectionId,
+          created_by: null,
+        })
+        .select("id")
+        .single();
+      if (batchErr) return { error: batchErr.message };
+      const { error: insErr } = await admin
+        .from("adjustment_assignments")
+        .insert(insertRows.map((row) => ({ ...row, batch_id: batch.id })));
       if (insErr) return { error: insErr.message };
       savedCount += insertRows.length;
     }

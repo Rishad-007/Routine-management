@@ -20,8 +20,37 @@
 begin;
 
 -- ---------- CLEAR ALL EXISTING DATA (FK-safe order) ----------
-delete from adjustments;
-delete from routines;
+-- The normalized schema exposes routines/adjustments as read-only views.
+-- Use temporary legacy-shaped staging tables while loading this generated data.
+drop view if exists public.routines cascade;
+drop view if exists public.adjustments cascade;
+create temporary table routines (
+  section_id uuid not null,
+  day int not null,
+  period_number int not null,
+  teacher_id uuid,
+  subject_id uuid,
+  room_id uuid,
+  is_tag boolean not null default false
+);
+create temporary table adjustments (
+  adjust_date date not null,
+  section_id uuid not null,
+  period_number int not null,
+  is_tag boolean not null default false,
+  original_teacher_id uuid,
+  new_teacher_id uuid,
+  original_subject_id uuid,
+  new_subject_id uuid,
+  original_room_id uuid,
+  new_room_id uuid,
+  reason text,
+  created_by uuid
+);
+delete from adjustment_assignments;
+delete from adjustment_batches;
+delete from routine_assignments;
+delete from routine_slots;
 delete from teacher_subjects;
 delete from teachers;
 delete from sections;
@@ -1051,6 +1080,64 @@ where extract(dow from CURRENT_DATE::date) between 0 and 4;
 -- =============================================================
 --  SUMMARY
 -- =============================================================
+-- Convert the staging rows into the normalized production tables.
+insert into routine_slots (section_id, day, period_number)
+select distinct section_id, day, period_number
+  from routines;
+
+insert into routine_assignments (slot_id, assignment_role, teacher_id, subject_id, room_id)
+select rs.id,
+       case when r.is_tag then 'tag' else 'primary' end,
+       r.teacher_id, r.subject_id, r.room_id
+  from routines r
+  join routine_slots rs on rs.section_id = r.section_id
+                       and rs.day = r.day
+                       and rs.period_number = r.period_number;
+
+insert into adjustment_batches (adjust_date, section_id, reason, created_by)
+select distinct on (adjust_date, section_id)
+       adjust_date, section_id, reason, created_by
+  from adjustments
+ order by adjust_date, section_id, period_number desc
+on conflict (adjust_date, section_id) do nothing;
+
+insert into adjustment_assignments (
+  batch_id, period_number, assignment_role,
+  original_teacher_id, new_teacher_id,
+  original_subject_id, new_subject_id,
+  original_room_id, new_room_id, reason
+)
+select b.id, a.period_number,
+       case when a.is_tag then 'tag' else 'primary' end,
+       a.original_teacher_id, a.new_teacher_id,
+       a.original_subject_id, a.new_subject_id,
+       a.original_room_id, a.new_room_id, a.reason
+  from adjustments a
+  join adjustment_batches b on b.adjust_date = a.adjust_date
+                            and b.section_id = a.section_id;
+
+drop table routines;
+drop table adjustments;
+
+create view public.routines as
+select ra.id, rs.section_id, rs.day, rs.period_number,
+       ra.teacher_id, ra.subject_id, ra.room_id,
+       (ra.assignment_role = 'tag') as is_tag,
+       false as is_adjusted, null::uuid as original_teacher_id,
+       ra.created_at, ra.updated_at
+  from routine_assignments ra
+  join routine_slots rs on rs.id = ra.slot_id;
+
+create view public.adjustments as
+select aa.id, ab.adjust_date, ab.section_id, aa.period_number,
+       (aa.assignment_role = 'tag') as is_tag,
+       aa.original_teacher_id, aa.new_teacher_id,
+       aa.original_subject_id, aa.new_subject_id,
+       aa.original_room_id, aa.new_room_id,
+       aa.reason, ab.created_by, aa.created_at
+  from adjustment_assignments aa
+  join adjustment_batches ab on ab.id = aa.batch_id;
+
 select 'classes' as entity, count(*) as rows from classes
 union all select 'rooms', count(*) from rooms
 union all select 'subjects', count(*) from subjects

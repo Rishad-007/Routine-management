@@ -41,22 +41,29 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Copy `.env.local.example` to `.env.local` and fill in real values:
 
-| Variable | Where to get it |
-| --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API (anon key) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API (service role key, server-only) |
-| `ADMIN_USERNAME` | Super admin username |
-| `ADMIN_PASSWORD_HASH` | `bcrypt` hash of the admin password |
-| `SESSION_SECRET` | `openssl rand -hex 32` |
-| `SCHOOL_NAME` | Display name shown in the header / PDF reports |
+| Variable                        | Where to get it                                                   |
+| ------------------------------- | ----------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase → Project Settings → API                                 |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API (anon key)                      |
+| `SUPABASE_SERVICE_ROLE_KEY`     | Supabase → Project Settings → API (service role key, server-only) |
+| `ADMIN_USERNAME`                | Super admin username                                              |
+| `ADMIN_PASSWORD_HASH`           | `bcrypt` hash of the admin password                               |
+| `SESSION_SECRET`                | `openssl rand -hex 32`                                            |
+| `SCHOOL_NAME`                   | Display name shown in the header / PDF reports                    |
 
 ### Database setup
 
-Apply the SQL scripts in the Supabase SQL Editor (in order):
+For a new/empty Supabase project, apply these SQL scripts in the Supabase SQL Editor (in order):
 
 1. `supabase/schema.sql` — tables, RLS, and conflict-validation triggers.
 2. `supabase/demo-data.sql` — demo classes/teachers/subjects/routines + sample daily adjustments.
+
+`demo-data.sql` stages its generated legacy-shaped rows temporarily, then converts them into the
+normalized routine and adjustment tables. It is compatible with the current schema views.
+
+For an existing database that still has the original `routines` and `adjustments` tables, run
+`supabase/migrate-normalized-schema.sql` once instead. It preserves existing routine and adjustment
+history while creating the normalized tables required by the admin save actions.
 
 ## Scripts
 
