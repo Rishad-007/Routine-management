@@ -5,13 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1051,7 +1045,7 @@ export function AdjustBuilder({
         open={!!routineTeacher}
         onOpenChange={(open) => !open && setRoutineTeacherId(null)}
       >
-        <DialogContent className="flex h-[min(92vh,900px)] max-h-[92vh] w-[99vw] max-w-[1800px] flex-col gap-3 overflow-hidden p-5 sm:aspect-auto sm:h-[min(92vh,900px)]">
+        <DialogContent className="flex h-[min(92vh,900px)] max-h-[92vh] w-[90vw] sm:max-w-[1200px] flex-col gap-3 overflow-hidden p-5">
           {routineTeacher && routinePreview && (
             <>
               <DialogHeader>
@@ -1173,20 +1167,20 @@ export function AdjustBuilder({
       </Dialog>
 
       {/* Teacher assignment sheet */}
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-sm">
-          <SheetHeader>
-            <SheetTitle>
+      <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
+        <DialogContent className="flex w-[70vw] max-w-[1200px] max-h-[85vh] flex-col gap-3 overflow-hidden p-5">
+          <DialogHeader>
+            <DialogTitle>
               {sheetTab === "tag"
                 ? `Tag session — Period ${sheetPeriod}`
                 : `Assign teacher — Period ${sheetPeriod}`}
-            </SheetTitle>
-            <SheetDescription>
+            </DialogTitle>
+            <DialogDescription>
               {sheetTab === "tag"
                 ? "Select a free teacher for the tag session. Overrides subject/room too."
                 : 'Pick a free teacher for this period. Busy teachers are shown for reference; load, continuous stretch and "already 4/5 classes" help you choose.'}
-            </SheetDescription>
-          </SheetHeader>
+            </DialogDescription>
+          </DialogHeader>
 
           {/* Tag session overrides (subject/room/teacher) */}
           {sheetTab === "tag" && sheetPeriod && (
@@ -1432,8 +1426,8 @@ export function AdjustBuilder({
                 </Button>
               </div>
             )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       {/* Red warning confirmation dialog */}
       <AlertDialog
