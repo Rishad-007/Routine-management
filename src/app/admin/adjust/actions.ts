@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import { simulateTeacherAssignment } from "@/lib/conflicts";
+import { isPeriodAllowed, describePeriodRange } from "@/lib/class-period-rules";
+import { getClassPeriodRules, getClasses, getSections } from "@/lib/data";
 import { getSchoolDayIndex, resolveAdjustDate } from "@/lib/periods";
-import type { RoutineRow } from "@/lib/types";
+import { DAY_LABELS, type RoutineRow } from "@/lib/types";
 
 export interface PeriodAdjustment {
   period: number;
@@ -22,6 +24,37 @@ export interface PeriodAdjustment {
 }
 
 /**
+ * Class period-range rule check. Returns a friendly error string naming the
+ * first rejected adjustment, or null when every period is allowed.
+ * Uses the adjustment date's day-of-week (Thursday rules can be tighter).
+ */
+async function periodRuleError(
+  changes: PeriodAdjustment[],
+  dayIndex: number,
+): Promise<string | null> {
+  const [rules, sections, classes] = await Promise.all([
+    getClassPeriodRules(),
+    getSections(),
+    getClasses(),
+  ]);
+  const classOf = (sectionId: string) => {
+    const s = sections.find((x) => x.id === sectionId);
+    return s ? classes.find((c) => c.id === s.class_id) : undefined;
+  };
+  for (const c of changes) {
+    const cls = classOf(c.sectionId);
+    if (!cls) continue;
+    if (isPeriodAllowed(rules, cls.id, dayIndex, c.period)) continue;
+    return `${cls.name} only has ${describePeriodRange(
+      rules,
+      cls.id,
+      dayIndex,
+    )} on ${DAY_LABELS[dayIndex]} (period ${c.period} rejected).`;
+  }
+  return null;
+}
+
+/**
  * Replace the date-scoped adjustments for (date, section).
  * Pass only the periods that have a substitution (newTeacherId set);
  * clearing a substitution = omitting it from the list.
@@ -35,6 +68,12 @@ export async function saveDayAdjustments(
   const effectiveDate = resolveAdjustDate(adjustDate);
   if (!effectiveDate || !sectionId)
     return { error: "Date and section are required." };
+
+  const dayIndex = getSchoolDayIndex(new Date(effectiveDate + "T00:00:00"));
+  if (dayIndex !== null) {
+    const ruleError = await periodRuleError(changes, dayIndex);
+    if (ruleError) return { error: ruleError };
+  }
 
   const { error: delErr } = await admin
     .from("adjustment_batches")
@@ -94,6 +133,10 @@ export async function saveAllAdjustments(
 
   const dayIndex = getSchoolDayIndex(new Date(effectiveDate + "T00:00:00"));
   if (dayIndex === null) return { error: "Cannot adjust on a weekend." };
+
+  // Class period-range rule check (defense-in-depth at the API layer).
+  const ruleError = await periodRuleError(changes, dayIndex);
+  if (ruleError) return { error: ruleError };
 
   // Fetch all routines for conflict validation.
   const { data: allRoutines, error: rErr } = await admin

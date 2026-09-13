@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import { allTeacherLoads, isTeacherBusy } from "@/lib/conflicts";
-import type { RoutineRow } from "@/lib/types";
+import { isPeriodAllowed, describePeriodRange } from "@/lib/class-period-rules";
+import { getClassPeriodRules, getClasses, getSections } from "@/lib/data";
+import { DAY_LABELS, type RoutineRow } from "@/lib/types";
 
 export interface MatrixEdit {
   day: number;
@@ -33,6 +35,30 @@ export async function saveSectionRoutine(
 ) {
   const { admin } = await authed();
   if (!sectionId) return { error: "Missing section." };
+
+  // Class period-range rule check (server-authoritative, friendly message).
+  // Class 1–2 start at period 5; Class 3/4 end at 4 (3 on Thursday), etc.
+  const [rules, sections, classes] = await Promise.all([
+    getClassPeriodRules(),
+    getSections(),
+    getClasses(),
+  ]);
+  const section = sections.find((s) => s.id === sectionId);
+  const sectionClass = section
+    ? classes.find((c) => c.id === section.class_id)
+    : undefined;
+  if (sectionClass) {
+    for (const e of edits) {
+      if (isPeriodAllowed(rules, sectionClass.id, e.day, e.period)) continue;
+      return {
+        error: `${sectionClass.name} only has ${describePeriodRange(
+          rules,
+          sectionClass.id,
+          e.day,
+        )} on ${DAY_LABELS[e.day]} (period ${e.period} rejected).`,
+      };
+    }
+  }
 
   const teacherNames = new Map<string, string>();
   const { data: teachers, error: tErr } = await admin

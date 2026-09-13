@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { periodRangesForClassName } from "@/lib/class-period-rules";
 
 // ---------------- Classes ----------------
 
@@ -10,10 +11,31 @@ export async function createClass(name: string, sortOrder: number) {
   const { admin } = await authed();
   const trimmed = name.trim();
   if (!trimmed) return { error: "Class name is required." };
-  const { error } = await admin
+
+  const { data: created, error } = await admin
     .from("classes")
-    .insert({ name: trimmed, sort_order: sortOrder });
+    .insert({ name: trimmed, sort_order: sortOrder })
+    .select("id")
+    .single();
   if (error) return { error: error.message };
+  if (!created) return { error: "Class was not created." };
+
+  // Auto-provision class_period_rules from the school rule table so a class
+  // named "Class N" immediately gets its period range instead of being
+  // treated as unrestricted. Names without a known suffix get no rows.
+  const ranges = periodRangesForClassName(trimmed);
+  if (ranges && ranges.length > 0) {
+    const { error: ruleErr } = await admin.from("class_period_rules").insert(
+      ranges.map((r) => ({
+        class_id: created.id as string,
+        day: r.day,
+        min_period: r.minPeriod,
+        max_period: r.maxPeriod,
+      })),
+    );
+    if (ruleErr) return { error: ruleErr.message };
+  }
+
   revalidatePath("/admin/master-data");
   return { success: true };
 }

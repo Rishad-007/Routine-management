@@ -56,6 +56,11 @@ import {
   weeklyLoad,
   longestConsecutiveStretch,
 } from "@/lib/conflicts";
+import {
+  isPeriodAllowed,
+  describePeriodRange,
+  type ClassPeriodRule,
+} from "@/lib/class-period-rules";
 import { saveSectionRoutine, type MatrixEdit } from "@/app/admin/routine/actions";
 import type {
   ClassRow,
@@ -75,6 +80,7 @@ interface Props {
   rooms: RoomRow[];
   teacherSubjects: TeacherSubjectRow[];
   routines: RoutineRow[];
+  rules: ClassPeriodRule[];
 }
 
 interface Cell {
@@ -159,6 +165,7 @@ export function RoutineBuilder({
   rooms,
   teacherSubjects,
   routines,
+  rules,
 }: Props) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -197,14 +204,34 @@ export function RoutineBuilder({
 
   const classSections = sections.filter((s) => s.class_id === classId);
 
+  // Periods outside the selected class's configured range for a day are not
+  // editable (see class_period_rules). They render disabled with a tooltip.
+  const sectionClass = classId
+    ? classes.find((c) => c.id === classId)
+    : undefined;
+  const isPeriodDisabled = (day: number, period: number) =>
+    classId ? !isPeriodAllowed(rules, classId, day, period) : false;
+
   // Load matrix when section changes.
   const loadSection = (id: string) => {
     setSectionId(id);
     const sectionRoom =
       sections.find((s) => s.id === id)?.room_id ?? null;
+    const secClass = sections.find((s) => s.id === id)?.class_id ?? null;
+    const secClassName = secClass
+      ? classes.find((c) => c.id === secClass)?.name
+      : undefined;
+    let skipped = 0;
     const m: Matrix = {};
     for (const r of routines) {
       if (r.section_id !== id) continue;
+      // Any pre-existing cell outside the class's allowed periods (legacy
+      // data) is dropped from the editable grid — re-saving it would be
+      // rejected server-side and by the DB trigger.
+      if (secClass && !isPeriodAllowed(rules, secClass, r.day, r.period_number)) {
+        skipped += 1;
+        continue;
+      }
       if (!m[r.day]) m[r.day] = {};
 
       if (r.is_tag) {
@@ -240,6 +267,12 @@ export function RoutineBuilder({
     setMatrix(m);
     setSelected(null);
     setDirty(false);
+    if (skipped > 0) {
+      toast.warning(
+        `${skipped} pre-existing cell(s) for this section fell outside ${secClassName ?? "the class"}'s allowed periods and were removed before editing.`,
+        { duration: 6000 },
+      );
+    }
   };
 
   const selectedCell: Cell | undefined = selected
@@ -377,7 +410,10 @@ export function RoutineBuilder({
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const day = Number(String(active.id).split("-")[0]);
-    const periods = PERIOD_ORDER.map((p) => `${day}-${p}`);
+    // Restrict swaps to periods that are editable for this day — out-of-range
+    // (disabled) periods cannot receive a drop.
+    const activePeriods = PERIOD_ORDER.filter((p) => !isPeriodDisabled(day, p));
+    const periods = activePeriods.map((p) => `${day}-${p}`);
     const oldIndex = periods.indexOf(String(active.id));
     const newIndex = periods.indexOf(String(over.id));
     if (oldIndex < 0 || newIndex < 0) return;
@@ -387,7 +423,7 @@ export function RoutineBuilder({
       const assignments = periods.map((id) => dayMap[Number(id.split("-")[1])]);
       const reordered = arrayMove(assignments, oldIndex, newIndex);
       reordered.forEach((cell, idx) => {
-        if (cell) dayMap[PERIOD_ORDER[idx]] = cell;
+        if (cell) dayMap[activePeriods[idx]] = cell;
       });
       // clear any stale slots not covered by PERIOD_ORDER
       for (const p of Object.keys(dayMap)) {
@@ -405,6 +441,8 @@ export function RoutineBuilder({
       for (const period of Object.keys(matrix[Number(day)] ?? {})) {
         const c = matrix[Number(day)][Number(period)];
         if (!c) continue;
+        // Guard against any stale out-of-range cell reaching the server.
+        if (isPeriodDisabled(Number(day), Number(period))) continue;
         // Primary session
         if (c.subjectId || c.teacherId || c.roomId) {
           edits.push({
@@ -552,7 +590,7 @@ export function RoutineBuilder({
                 {DAY_LABEL_LIST.map((day, di) => (
                   <SortableContext
                     key={day}
-                    items={PERIOD_ORDER.map((p) => `${di}-${p}`)}
+                    items={PERIOD_ORDER.filter((p) => !isPeriodDisabled(di, p)).map((p) => `${di}-${p}`)}
                     strategy={verticalListSortingStrategy}
                   >
                     <tr>
@@ -560,7 +598,35 @@ export function RoutineBuilder({
                         {day}
                       </td>
                       {PERIOD_ORDER.map((p) => {
+                        const disabled = isPeriodDisabled(di, p);
                         const cell = matrix[di]?.[p];
+
+                        // Out-of-range periods: show a disabled placeholder
+                        // (never hidden) so the admin sees why the cell is
+                        // missing. Not clickable and not draggable-into.
+                        if (disabled) {
+                          return (
+                            <td
+                              key={`${di}-${p}`}
+                              title={`${sectionClass?.name ?? "This class"} only has ${describePeriodRange(
+                                rules,
+                                classId,
+                                di,
+                              )} on ${DAY_LABEL_LIST[di]}`}
+                              className="border border-slate-200 bg-slate-100/70 px-1 py-1 text-center align-middle opacity-60"
+                            >
+                              <div className="flex min-h-[52px] flex-col items-center justify-center gap-0.5">
+                                <span className="text-xs line-through decoration-slate-300">
+                                  P{p}
+                                </span>
+                                <span className="max-w-[64px] text-[9px] leading-tight text-slate-400">
+                                  {describePeriodRange(rules, classId, di)}
+                                </span>
+                              </div>
+                            </td>
+                          );
+                        }
+
                         const isSel =
                           selected?.day === di && selected?.period === p;
                         const subj = cell?.subjectId ? subjectNames.get(cell.subjectId) : undefined;

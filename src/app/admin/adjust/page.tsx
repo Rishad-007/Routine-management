@@ -6,6 +6,7 @@ import {
   getRooms,
   getRoutines,
   getAllAdjustments,
+  getClassPeriodRules,
 } from "@/lib/data";
 import { getTodayLocal } from "@/lib/periods";
 import { AdjustBuilder } from "@/components/admin/adjust/adjust-builder";
@@ -13,7 +14,7 @@ import { AdjustBuilder } from "@/components/admin/adjust/adjust-builder";
 export const dynamic = "force-dynamic";
 
 export default async function AdminAdjustPage() {
-  const [classes, sections, teachers, subjects, rooms, routines, adjustments] =
+  const [classes, sections, teachers, subjects, rooms, routines, adjustments, classPeriodRules] =
     await Promise.all([
       getClasses(),
       getSections(),
@@ -22,6 +23,7 @@ export default async function AdminAdjustPage() {
       getRooms(),
       getRoutines(),
       getAllAdjustments(),
+      getClassPeriodRules(),
     ]);
 
   return (
@@ -43,6 +45,7 @@ export default async function AdminAdjustPage() {
         routines={routines}
         adjustments={adjustments}
         initialDate={getTodayLocal()}
+        rules={classPeriodRules}
       />
     </div>
   );

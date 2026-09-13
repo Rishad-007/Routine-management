@@ -6,13 +6,14 @@ import {
   getRooms,
   getTeacherSubjects,
   getRoutines,
+  getClassPeriodRules,
 } from "@/lib/data";
 import { RoutineBuilder } from "@/components/admin/routine/routine-builder";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminRoutinePage() {
-  const [classes, sections, teachers, subjects, rooms, teacherSubjects, routines] =
+  const [classes, sections, teachers, subjects, rooms, teacherSubjects, routines, classPeriodRules] =
     await Promise.all([
       getClasses(),
       getSections(),
@@ -21,6 +22,7 @@ export default async function AdminRoutinePage() {
       getRooms(),
       getTeacherSubjects(),
       getRoutines(),
+      getClassPeriodRules(),
     ]);
 
   return (
@@ -40,6 +42,7 @@ export default async function AdminRoutinePage() {
         rooms={rooms}
         teacherSubjects={teacherSubjects}
         routines={routines}
+        rules={classPeriodRules}
       />
     </div>
   );

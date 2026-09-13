@@ -3,6 +3,7 @@ import { createClient } from "./supabase/server";
 import { getTodayLocal } from "./periods";
 import {
   type ClassRow,
+  type ClassPeriodRuleRow,
   type SectionRow,
   type SubjectRow,
   type TeacherRow,
@@ -12,6 +13,7 @@ import {
   type AdjustmentRow,
   type SettingsRow,
 } from "./types";
+import type { ClassPeriodRule } from "./class-period-rules";
 
 async function db() {
   return createClient();
@@ -32,6 +34,19 @@ export async function getSections(): Promise<SectionRow[]> {
   const { data, error } = await (await db()).from("sections").select("*");
   if (error) throw new Error(error.message);
   return (data as SectionRow[]) ?? [];
+}
+
+export async function getClassPeriodRules(): Promise<ClassPeriodRule[]> {
+  const { data, error } = await (await db())
+    .from("class_period_rules")
+    .select("*");
+  if (error) throw new Error(error.message);
+  return ((data as ClassPeriodRuleRow[]) ?? []).map((r) => ({
+    classId: r.class_id,
+    day: r.day,
+    minPeriod: r.min_period,
+    maxPeriod: r.max_period,
+  }));
 }
 
 export async function getRooms(): Promise<RoomRow[]> {

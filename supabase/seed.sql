@@ -20,6 +20,38 @@ insert into classes (name, sort_order) values
   ('Class 9', 4),
   ('Class 10', 5);
 
+-- ---------- CLASS PERIOD RULES ----------
+-- Which lesson periods each class may use per day (0=Sun .. 3=Wed, 4=Thu).
+-- Rule table (Sun-Wed / Thursday):
+--   Class 1,2: 5-7 / 5-7 | Class 3,4: 1-4 / 1-3 | Class 5: 1-5 / 1-4
+--   Class 6,7,8: 1-6 / 1-6 | Class 9,10: 1-7 / 1-7
+-- Only rows for classes that actually exist are created (the join to
+-- `classes` guarantees this). Kept in sync with src/lib/class-period-rules.ts
+-- and supabase/class-period-rules.sql.
+with rules(class_name, lo, hi, lo_thu, hi_thu) as (
+  values
+    ('Class 1',  5, 7, 5, 7),
+    ('Class 2',  5, 7, 5, 7),
+    ('Class 3',  1, 4, 1, 3),
+    ('Class 4',  1, 4, 1, 3),
+    ('Class 5',  1, 5, 1, 4),
+    ('Class 6',  1, 6, 1, 6),
+    ('Class 7',  1, 6, 1, 6),
+    ('Class 8',  1, 6, 1, 6),
+    ('Class 9',  1, 7, 1, 7),
+    ('Class 10', 1, 7, 1, 7)
+), days(d) as (
+  values (0), (1), (2), (3), (4)
+)
+insert into class_period_rules (class_id, day, min_period, max_period)
+select c.id, d.d,
+       case when d.d = 4 then r.lo_thu else r.lo end,
+       case when d.d = 4 then r.hi_thu else r.hi end
+  from rules r
+  join classes c on c.name = r.class_name
+ cross join days d
+on conflict (class_id, day) do nothing;
+
 -- ---------- SAMPLE ROOMS ----------
 insert into rooms (name) values
   ('Room 101'), ('Room 102'), ('Room 103'),

@@ -26,6 +26,10 @@ begin
 end $$;
 drop function if exists validate_routine_assignment();
 drop function if exists validate_adjustment_assignment();
+drop function if exists validate_routine_slot_period();
+drop function if exists validate_adjustment_period();
+drop trigger if exists trg_validate_routine_slot_period on routine_slots;
+drop trigger if exists trg_validate_adjustment_period on adjustment_assignments;
 drop trigger if exists trg_sync_section_room on sections;
 drop function if exists sync_section_room();
 drop table if exists settings cascade;
@@ -36,6 +40,7 @@ drop table if exists routine_slots cascade;
 drop table if exists teacher_subjects cascade;
 drop table if exists teachers cascade;
 drop table if exists sections cascade;
+drop table if exists class_period_rules cascade;
 drop table if exists subjects cascade;
 drop table if exists rooms cascade;
 drop table if exists classes cascade;
@@ -59,6 +64,21 @@ create table classes (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   sort_order int not null default 0
+);
+
+-- ---------- CLASS PERIOD RULES ----------
+-- Which lesson periods a class may be scheduled into, per day.
+-- 0=Sun .. 3=Wed share one range; Thursday (4) can differ.
+-- Seed data lives in seed.sql (kept in sync with the migration
+-- supabase/class-period-rules.sql and src/lib/class-period-rules.ts).
+create table class_period_rules (
+  id uuid primary key default gen_random_uuid(),
+  class_id uuid not null references classes(id) on delete cascade,
+  day int not null check (day between 0 and 4),
+  min_period int not null check (min_period between 1 and 7),
+  max_period int not null check (max_period between 1 and 7),
+  unique (class_id, day),
+  check (min_period <= max_period)
 );
 
 -- ---------- ROOMS ----------
@@ -176,6 +196,7 @@ insert into settings (key, value) values
 -- Indexes
 -- =============================================
 create index idx_sections_class on sections(class_id);
+create index idx_class_period_rules_class on class_period_rules(class_id);
 create index idx_routine_slots_section on routine_slots(section_id);
 create index idx_routine_slots_day_period on routine_slots(day, period_number);
 create index idx_routine_assignments_teacher on routine_assignments(teacher_id);
@@ -331,6 +352,91 @@ create trigger trg_validate_adjustment_assignment
 before insert or update on adjustment_assignments
 for each row execute function validate_adjustment_assignment();
 
+-- =============================================
+-- Class period-range validators (defense-in-depth).
+-- A routine/adjustment row is valid only if its period_number falls inside
+-- the class's configured [min_period, max_period] for that class and day.
+-- Keyed off section_id, so tag rows (same section) are covered automatically.
+-- A class+day with no configured rule is treated as unrestricted, but the
+-- gap is logged with a raise notice rather than failing silently.
+-- =============================================
+create function validate_routine_slot_period() returns trigger as $$
+declare
+  v_class_id uuid;
+  v_class_name text;
+  v_rule record;
+begin
+  select s.class_id, c.name into v_class_id, v_class_name
+    from sections s
+    left join classes c on c.id = s.class_id
+   where s.id = new.section_id;
+
+  if v_class_id is null then
+    return new;
+  end if;
+
+  select min_period, max_period into v_rule
+    from class_period_rules pr
+   where pr.class_id = v_class_id and pr.day = new.day;
+
+  if not found then
+    raise notice 'No class_period_rules for % (class id %) on day %; treating as unrestricted.',
+                 v_class_name, v_class_id, new.day;
+    return new;
+  end if;
+
+  if new.period_number < v_rule.min_period or new.period_number > v_rule.max_period then
+    raise exception 'Period % is outside the allowed range for % on this day (only periods % to %).',
+                    new.period_number, v_class_name, v_rule.min_period, v_rule.max_period;
+  end if;
+
+  return new;
+end $$ language plpgsql;
+
+create trigger trg_validate_routine_slot_period
+before insert or update on routine_slots
+for each row execute function validate_routine_slot_period();
+
+create function validate_adjustment_period() returns trigger as $$
+declare
+  v_class_id uuid;
+  v_class_name text;
+  v_adjust_day int;
+  v_rule record;
+begin
+  select s.class_id, c.name, extract(dow from ab.adjust_date)::int
+    into v_class_id, v_class_name, v_adjust_day
+    from adjustment_batches ab
+    join sections s on s.id = ab.section_id
+    left join classes c on c.id = s.class_id
+   where ab.id = new.batch_id;
+
+  if v_class_id is null then
+    return new;
+  end if;
+
+  select min_period, max_period into v_rule
+    from class_period_rules pr
+   where pr.class_id = v_class_id and pr.day = v_adjust_day;
+
+  if not found then
+    raise notice 'No class_period_rules for % (class id %) on day %; treating as unrestricted.',
+                 v_class_name, v_class_id, v_adjust_day;
+    return new;
+  end if;
+
+  if new.period_number < v_rule.min_period or new.period_number > v_rule.max_period then
+    raise exception 'Period % is outside the allowed range for % on this day (only periods % to %).',
+                    new.period_number, v_class_name, v_rule.min_period, v_rule.max_period;
+  end if;
+
+  return new;
+end $$ language plpgsql;
+
+create trigger trg_validate_adjustment_period
+before insert or update on adjustment_assignments
+for each row execute function validate_adjustment_period();
+
 -- Normal weekly load, daily load, and the longest continuous run. A run is
 -- calculated separately on either side of the period-4 tiffin break.
 create view teacher_weekly_load as
@@ -405,6 +511,7 @@ end $$ language plpgsql stable;
 -- =============================================
 alter table admins enable row level security;
 alter table classes enable row level security;
+alter table class_period_rules enable row level security;
 alter table sections enable row level security;
 alter table rooms enable row level security;
 alter table subjects enable row level security;
@@ -418,6 +525,7 @@ alter table settings enable row level security;
 
 -- Read-only policies for anon (public client area)
 create policy "Public read classes" on classes for select to anon using (true);
+create policy "Public read class_period_rules" on class_period_rules for select to anon using (true);
 create policy "Public read sections" on sections for select to anon using (true);
 create policy "Public read rooms" on rooms for select to anon using (true);
 create policy "Public read subjects" on subjects for select to anon using (true);

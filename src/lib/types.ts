@@ -17,6 +17,14 @@ export interface ClassRow {
   sort_order: number;
 }
 
+export interface ClassPeriodRuleRow {
+  id: string;
+  class_id: string;
+  day: number;
+  min_period: number;
+  max_period: number;
+}
+
 export interface SectionRow {
   id: string;
   class_id: string;

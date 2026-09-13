@@ -57,6 +57,11 @@ import {
   longestConsecutiveStretch,
 } from "@/lib/conflicts";
 import {
+  isPeriodAllowed,
+  describePeriodRange,
+  type ClassPeriodRule,
+} from "@/lib/class-period-rules";
+import {
   saveAllAdjustments,
   type PeriodAdjustment,
 } from "@/app/admin/adjust/actions";
@@ -79,6 +84,7 @@ interface Props {
   routines: RoutineRow[];
   adjustments: AdjustmentRow[];
   initialDate?: string;
+  rules: ClassPeriodRule[];
 }
 
 function toDateInput(d: Date) {
@@ -121,6 +127,7 @@ export function AdjustBuilder({
   routines,
   adjustments,
   initialDate,
+  rules,
 }: Props) {
   const router = useRouter();
 
@@ -172,6 +179,26 @@ export function AdjustBuilder({
     () => new Map(subjects.map((s) => [s.id, s])),
     [subjects],
   );
+
+  // Class period-range helpers (see class_period_rules). Adjustments write the
+  // same period_number column as routines, so they obey the same rule. The day
+  // used is the SELECTED date's day-of-week — Thursday ranges can be tighter.
+  const classForSection = (sectionId: string) => {
+    const s = sections.find((x) => x.id === sectionId);
+    return s ? classes.find((c) => c.id === s.class_id) : undefined;
+  };
+  const sectionPeriodAllowed = (
+    sectionId: string,
+    day: number,
+    period: number,
+  ) => {
+    const cls = classForSection(sectionId);
+    return cls ? isPeriodAllowed(rules, cls.id, day, period) : true;
+  };
+  const sectionPeriodRangeLabel = (sectionId: string, day: number) => {
+    const cls = classForSection(sectionId);
+    return cls ? describePeriodRange(rules, cls.id, day) : null;
+  };
 
   const selectedTeacher = useMemo(
     () => teachers.find((t) => t.id === selectedTeacherId) ?? null,
@@ -448,6 +475,15 @@ export function AdjustBuilder({
     const cell = dayCells.find((c) => c.period === period);
     if (!cell) return;
 
+    // Class period-range rule: adjustment writes period_number like a routine,
+    // so it must fall inside the class's allowed range for the selected date.
+    if (!sectionPeriodAllowed(cell.sectionId, dayIndex!, period)) {
+      toast.error(
+        `${classForSection(cell.sectionId)?.name ?? "This class"} only has ${sectionPeriodRangeLabel(cell.sectionId, dayIndex!)} on ${DAY_LABEL_LIST[dayIndex!]} — period ${period} is not allowed for adjustments.`,
+      );
+      return;
+    }
+
     if (newTeacherId === cell.baseTeacherId) {
       setOverrides((prev) => {
         const next = { ...prev };
@@ -512,6 +548,13 @@ export function AdjustBuilder({
   const handleAssignTag = (period: number, newTeacherId: string) => {
     const cell = dayCells.find((c) => c.period === period);
     if (!cell || !cell.isTag) return;
+
+    if (!sectionPeriodAllowed(cell.sectionId, dayIndex!, period)) {
+      toast.error(
+        `${classForSection(cell.sectionId)?.name ?? "This class"} only has ${sectionPeriodRangeLabel(cell.sectionId, dayIndex!)} on ${DAY_LABEL_LIST[dayIndex!]} — period ${period} is not allowed for adjustments.`,
+      );
+      return;
+    }
 
     setTagOverrides((prev) => ({
       ...prev,
@@ -895,6 +938,9 @@ export function AdjustBuilder({
                       {dayCells.map((cell) => {
                         const override = overrides[cell.period];
                         const hasOverride = !!override;
+                        const outOfRange =
+                          dayIndex !== null &&
+                          !sectionPeriodAllowed(cell.sectionId, dayIndex, cell.period);
                         const effectiveName = override
                           ? teachers.find((t) => t.id === override.newTeacherId)
                               ?.short_name
@@ -924,6 +970,15 @@ export function AdjustBuilder({
                                 <span className="block text-xs font-normal text-amber-500">
                                   Tiffin↓
                                 </span>
+                              )}
+                              {outOfRange && (
+                                <Badge
+                                  variant="secondary"
+                                  className="mt-0.5 block bg-red-100 text-[9px] text-red-700"
+                                  title={`${classForSection(cell.sectionId)?.name ?? "This class"} only has ${sectionPeriodRangeLabel(cell.sectionId, dayIndex!)} on ${DAY_LABEL_LIST[dayIndex!]}`}
+                                >
+                                  outside allowed
+                                </Badge>
                               )}
                             </td>
                             <td className="border border-slate-200 px-3 py-2">
@@ -1008,7 +1063,7 @@ export function AdjustBuilder({
                                   onClick={() =>
                                     handleCellClick(cell.period, "primary")
                                   }
-                                  disabled={isPastDate}
+                                  disabled={isPastDate || outOfRange}
                                   className="h-8 text-sm"
                                 >
                                   Change
@@ -1020,7 +1075,7 @@ export function AdjustBuilder({
                                     onClick={() =>
                                       handleCellClick(cell.period, "tag")
                                     }
-                                    disabled={isPastDate}
+                                    disabled={isPastDate || outOfRange}
                                     className="h-8 text-sm text-teal-600"
                                   >
                                     Tag
