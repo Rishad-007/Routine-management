@@ -183,6 +183,8 @@ export async function createTeacher(input: {
   isOpenTeacher: boolean;
   primarySubjectId: string | null;
   subjectIds: string[];
+  designation: string;
+  classTeacherSectionId: string | null;
 }) {
   const { admin } = await authed();
   if (!input.teacherCode.trim() || !input.fullName.trim() || !input.shortName.trim())
@@ -193,6 +195,8 @@ export async function createTeacher(input: {
     short_name: input.shortName.trim(),
     is_open_teacher: input.isOpenTeacher,
     primary_subject_id: input.primarySubjectId,
+    designation: input.designation.trim(),
+    class_teacher_section_id: input.classTeacherSectionId,
   });
   if (error) return { error: error.message };
   const { data, error: getErr } = await admin
@@ -215,6 +219,8 @@ export async function updateTeacher(
     isOpenTeacher: boolean;
     primarySubjectId: string | null;
     subjectIds: string[];
+    designation: string;
+    classTeacherSectionId: string | null;
   }
 ) {
   const { admin } = await authed();
@@ -228,6 +234,8 @@ export async function updateTeacher(
       short_name: input.shortName.trim(),
       is_open_teacher: input.isOpenTeacher,
       primary_subject_id: input.primarySubjectId,
+      designation: input.designation.trim(),
+      class_teacher_section_id: input.classTeacherSectionId,
     })
     .eq("id", id);
   if (error) return { error: error.message };

@@ -51,6 +51,8 @@ export interface TeacherRow {
   short_name: string;
   is_open_teacher: boolean;
   primary_subject_id: string | null;
+  designation: string;
+  class_teacher_section_id: string | null;
 }
 
 export interface TeacherSubjectRow {

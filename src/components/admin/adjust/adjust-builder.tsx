@@ -41,6 +41,7 @@ import {
   FileText,
   Loader2,
   Eye,
+  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -50,6 +51,7 @@ import {
 } from "@/lib/constants";
 import { getSchoolDayIndex, getTodayLocal } from "@/lib/periods";
 import {
+  applyAdjustmentsToRoutines,
   countDayPeriods,
   weeklyLoad,
   simulateTeacherAssignment,
@@ -153,6 +155,7 @@ export function AdjustBuilder({
   const [sheetSearch, setSheetSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [pendingRed, setPendingRed] = useState<{
     adjustment: PeriodAdjustment;
     reasons: string[];
@@ -175,10 +178,38 @@ export function AdjustBuilder({
     [date],
   );
 
+  const effectiveRoutines = useMemo(
+    () => applyAdjustmentsToRoutines(routines, adjustments, date),
+    [routines, adjustments, date],
+  );
+
   const subjectMap = useMemo(
     () => new Map(subjects.map((s) => [s.id, s])),
     [subjects],
   );
+
+  const adjustmentHistory = useMemo(() => {
+    const groups = new Map<string, AdjustmentRow[]>();
+    for (const adjustment of adjustments) {
+      const rows = groups.get(adjustment.adjust_date) ?? [];
+      rows.push(adjustment);
+      groups.set(adjustment.adjust_date, rows);
+    }
+
+    return Array.from(groups, ([adjustDate, rows]) => {
+      const day = getSchoolDayIndex(new Date(`${adjustDate}T00:00:00`));
+      return {
+        adjustDate,
+        dayLabel: day === null ? "Weekend" : DAY_LABEL_LIST[day],
+        rows: rows.sort((a, b) => {
+          if (a.period_number !== b.period_number) {
+            return a.period_number - b.period_number;
+          }
+          return a.section_id.localeCompare(b.section_id);
+        }),
+      };
+    }).sort((a, b) => b.adjustDate.localeCompare(a.adjustDate));
+  }, [adjustments]);
 
   // Class period-range helpers (see class_period_rules). Adjustments write the
   // same period_number column as routines, so they obey the same rule. The day
@@ -227,7 +258,7 @@ export function AdjustBuilder({
 
     for (const day of DAY_LABEL_LIST.map((_, index) => index)) {
       const teacherPeriods = new Set(
-        routines
+        effectiveRoutines
           .filter(
             (routine) =>
               routine.teacher_id === routineTeacherId && routine.day === day,
@@ -236,7 +267,7 @@ export function AdjustBuilder({
       );
 
       for (const period of PERIOD_ORDER) {
-        const routine = routines.find(
+        const routine = effectiveRoutines.find(
           (item) =>
             item.teacher_id === routineTeacherId &&
             item.day === day &&
@@ -254,7 +285,7 @@ export function AdjustBuilder({
         }
         for (
           let next = period + 1;
-          teacherPeriods.has(next) && period !== TIFFIN_AFTER_PERIOD;
+          teacherPeriods.has(next) && next !== TIFFIN_AFTER_PERIOD + 1;
           next += 1
         ) {
           continuous += 1;
@@ -303,14 +334,21 @@ export function AdjustBuilder({
       total: daily.reduce((sum, item) => sum + item.count, 0),
       longest: Math.max(0, ...daily.map((item) => item.continuous)),
     };
-  }, [routineTeacherId, routines, sections, classes, subjectMap, rooms]);
+  }, [
+    routineTeacherId,
+    effectiveRoutines,
+    sections,
+    classes,
+    subjectMap,
+    rooms,
+  ]);
 
   const dayRoutines = useMemo(() => {
     if (!selectedTeacherId || dayIndex === null) return [];
-    return routines.filter(
+    return effectiveRoutines.filter(
       (r) => r.teacher_id === selectedTeacherId && r.day === dayIndex,
     );
-  }, [routines, selectedTeacherId, dayIndex]);
+  }, [effectiveRoutines, selectedTeacherId, dayIndex]);
 
   const dayCells: DayCell[] = useMemo(() => {
     if (!selectedTeacherId || dayIndex === null) return [];
@@ -414,10 +452,10 @@ export function AdjustBuilder({
     const map = new Map<string, number>();
     if (dayIndex === null) return map;
     for (const t of teachers) {
-      map.set(t.id, countDayPeriods(routines, t.id, dayIndex));
+      map.set(t.id, countDayPeriods(effectiveRoutines, t.id, dayIndex));
     }
     return map;
-  }, [teachers, routines, dayIndex]);
+  }, [teachers, effectiveRoutines, dayIndex]);
 
   // Per-teacher stats for the active day: class count + longest continuous
   // stretch. Used by the teacher rail and the assignment sheet.
@@ -426,21 +464,30 @@ export function AdjustBuilder({
     if (dayIndex === null) return map;
     for (const t of teachers) {
       map.set(t.id, {
-        count: countDayPeriods(routines, t.id, dayIndex),
-        stretch: longestConsecutiveStretch(routines, t.id, dayIndex),
+        count: countDayPeriods(effectiveRoutines, t.id, dayIndex),
+        stretch: longestConsecutiveStretch(effectiveRoutines, t.id, dayIndex),
       });
     }
     return map;
-  }, [teachers, routines, dayIndex]);
+  }, [teachers, effectiveRoutines, dayIndex]);
 
   const freeTeachersForSheet = useMemo(() => {
     if (sheetPeriod === null || dayIndex === null) return [];
     return teachers
       .map((t) => {
-        const dayCount = countDayPeriods(routines, t.id, dayIndex);
-        const stretch = longestConsecutiveStretch(routines, t.id, dayIndex);
-        const week = weeklyLoad(routines, t.id);
-        const busy = isTeacherBusy(routines, t.id, dayIndex, sheetPeriod);
+        const dayCount = countDayPeriods(effectiveRoutines, t.id, dayIndex);
+        const stretch = longestConsecutiveStretch(
+          effectiveRoutines,
+          t.id,
+          dayIndex,
+        );
+        const week = weeklyLoad(effectiveRoutines, t.id);
+        const busy = isTeacherBusy(
+          effectiveRoutines,
+          t.id,
+          dayIndex,
+          sheetPeriod,
+        );
         return { ...t, dayCount, stretch, weekTotal: week.total, busy };
       })
       .sort(
@@ -448,7 +495,7 @@ export function AdjustBuilder({
           Number(a.busy) - Number(b.busy) ||
           a.short_name.localeCompare(b.short_name),
       );
-  }, [teachers, routines, dayIndex, sheetPeriod]);
+  }, [teachers, effectiveRoutines, dayIndex, sheetPeriod]);
 
   const filteredFreeTeachers = useMemo(() => {
     if (!sheetSearch.trim()) return freeTeachersForSheet;
@@ -495,7 +542,7 @@ export function AdjustBuilder({
     }
 
     const sim = simulateTeacherAssignment(
-      routines,
+      effectiveRoutines,
       newTeacherId,
       dayIndex!,
       period,
@@ -504,7 +551,7 @@ export function AdjustBuilder({
 
     // HARD BLOCK: the substitute is already teaching another class at this
     // day+period. This is a double-booking and cannot be force-approved.
-    if (isTeacherBusy(routines, newTeacherId, dayIndex!, period)) {
+    if (isTeacherBusy(effectiveRoutines, newTeacherId, dayIndex!, period)) {
       toast.error(
         "This teacher already has a class in another section at this period. Free them first before assigning.",
       );
@@ -691,10 +738,17 @@ export function AdjustBuilder({
   const hasChanges =
     Object.keys(overrides).length > 0 || Object.keys(tagOverrides).length > 0;
 
-  const downloadReport = () => {
-    if (!date || dayIndex === null) return;
+  const downloadReport = (reportDate = date) => {
+    const reportDay = reportDate
+      ? getSchoolDayIndex(new Date(`${reportDate}T00:00:00`))
+      : null;
+    if (!reportDate || reportDay === null) return;
     setReportLoading(true);
-    window.open(`/api/adjust-report.pdf?date=${date}`, "_blank", "noopener");
+    window.open(
+      `/api/adjust-report.pdf?date=${reportDate}`,
+      "_blank",
+      "noopener",
+    );
     setTimeout(() => setReportLoading(false), 2500);
   };
 
@@ -750,7 +804,16 @@ export function AdjustBuilder({
           <Button
             size="sm"
             variant="outline"
-            onClick={downloadReport}
+            onClick={() => setHistoryOpen(true)}
+            className="border-[#1e3a5f] text-[#1e3a5f] hover:bg-[#1e3a5f] hover:text-white"
+          >
+            <History className="mr-1.5 h-3.5 w-3.5" />
+            Check history
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => downloadReport()}
             disabled={reportLoading || dayIndex === null}
             className="border-[#0d9488] text-[#0d9488] hover:bg-[#0d9488] hover:text-white"
           >
@@ -763,6 +826,127 @@ export function AdjustBuilder({
           </Button>
         </div>
       </div>
+
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="flex max-h-[85vh] w-[min(94vw,900px)] flex-col gap-4 overflow-hidden p-5">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[#1e3a5f]">
+              <History className="h-5 w-5 text-[#0d9488]" />
+              Adjustment history
+            </DialogTitle>
+            <DialogDescription>
+              Previous adjustment days are sorted from newest to oldest. Select
+              a day to inspect its read-only routine or download its report.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="min-h-0 space-y-3 overflow-y-auto pr-1">
+            {adjustmentHistory.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-8 text-center text-sm text-slate-400">
+                No adjustment history yet.
+              </div>
+            ) : (
+              adjustmentHistory.map((group) => (
+                <div
+                  key={group.adjustDate}
+                  className="rounded-lg border border-slate-200 bg-white"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-slate-50 px-4 py-3">
+                    <div>
+                      <p className="font-semibold text-[#1e3a5f]">
+                        {group.adjustDate} · {group.dayLabel}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {group.rows.length} adjustment
+                        {group.rows.length === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setDate(group.adjustDate);
+                          setHistoryOpen(false);
+                        }}
+                      >
+                        <Eye className="mr-1.5 h-3.5 w-3.5" />
+                        View day
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadReport(group.adjustDate)}
+                        disabled={reportLoading}
+                        className="border-[#0d9488] text-[#0d9488] hover:bg-[#0d9488] hover:text-white"
+                      >
+                        <FileText className="mr-1.5 h-3.5 w-3.5" />
+                        Download PDF
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-155 text-sm">
+                      <thead>
+                        <tr className="text-left text-xs uppercase text-slate-500">
+                          <th className="px-4 py-2">Period</th>
+                          <th className="px-4 py-2">Class</th>
+                          <th className="px-4 py-2">Previous teacher</th>
+                          <th className="px-4 py-2">Assigned teacher</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((row) => {
+                          const section = sections.find(
+                            (item) => item.id === row.section_id,
+                          );
+                          const classRow = section
+                            ? classes.find(
+                                (item) => item.id === section.class_id,
+                              )
+                            : undefined;
+                          const originalTeacher = row.original_teacher_id
+                            ? teachers.find(
+                                (item) => item.id === row.original_teacher_id,
+                              )
+                            : undefined;
+                          const newTeacher = row.new_teacher_id
+                            ? teachers.find(
+                                (item) => item.id === row.new_teacher_id,
+                              )
+                            : undefined;
+                          return (
+                            <tr
+                              key={row.id}
+                              className="border-t border-slate-100"
+                            >
+                              <td className="px-4 py-2 font-medium text-slate-600">
+                                P{row.period_number}
+                                {row.is_tag ? " · Tag" : ""}
+                              </td>
+                              <td className="px-4 py-2 text-[#1e3a5f]">
+                                {classRow && section
+                                  ? `${classRow.name}-${section.name}`
+                                  : (section?.name ?? "—")}
+                              </td>
+                              <td className="px-4 py-2 text-slate-600">
+                                {originalTeacher?.short_name ?? "—"}
+                              </td>
+                              <td className="px-4 py-2 font-medium text-[#0d9488]">
+                                {newTeacher?.short_name ?? "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {isNoSchool ? (
         <div className="rounded-xl border border-dashed bg-white p-14 text-center text-sm text-slate-400">
@@ -940,7 +1124,11 @@ export function AdjustBuilder({
                         const hasOverride = !!override;
                         const outOfRange =
                           dayIndex !== null &&
-                          !sectionPeriodAllowed(cell.sectionId, dayIndex, cell.period);
+                          !sectionPeriodAllowed(
+                            cell.sectionId,
+                            dayIndex,
+                            cell.period,
+                          );
                         const effectiveName = override
                           ? teachers.find((t) => t.id === override.newTeacherId)
                               ?.short_name
@@ -1363,7 +1551,7 @@ export function AdjustBuilder({
               ) : (
                 filteredFreeTeachers.map((t) => {
                   const sim = simulateTeacherAssignment(
-                    routines,
+                    effectiveRoutines,
                     t.id,
                     dayIndex!,
                     sheetPeriod!,

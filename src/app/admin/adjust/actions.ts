@@ -2,11 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
-import { simulateTeacherAssignment } from "@/lib/conflicts";
+import {
+  applyAdjustmentsToRoutines,
+  simulateTeacherAssignment,
+} from "@/lib/conflicts";
 import { isPeriodAllowed, describePeriodRange } from "@/lib/class-period-rules";
 import { getClassPeriodRules, getClasses, getSections } from "@/lib/data";
 import { getSchoolDayIndex, resolveAdjustDate } from "@/lib/periods";
-import { DAY_LABELS, type RoutineRow } from "@/lib/types";
+import { DAY_LABELS, type AdjustmentRow, type RoutineRow } from "@/lib/types";
 
 export interface PeriodAdjustment {
   period: number;
@@ -139,14 +142,25 @@ export async function saveAllAdjustments(
   if (ruleError) return { error: ruleError };
 
   // Fetch all routines for conflict validation.
-  const { data: allRoutines, error: rErr } = await admin
-    .from("routines")
-    .select(
-      "id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag, is_adjusted, original_teacher_id",
-    );
+  const [
+    { data: allRoutines, error: rErr },
+    { data: dateAdjustments, error: aErr },
+  ] = await Promise.all([
+    admin
+      .from("routines")
+      .select(
+        "id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag, is_adjusted, original_teacher_id",
+      ),
+    admin.from("adjustments").select("*").eq("adjust_date", effectiveDate),
+  ]);
   if (rErr) return { error: rErr.message };
+  if (aErr) return { error: aErr.message };
 
-  const routines = (allRoutines ?? []) as RoutineRow[];
+  const routines = applyAdjustmentsToRoutines(
+    (allRoutines ?? []) as RoutineRow[],
+    (dateAdjustments ?? []) as AdjustmentRow[],
+    effectiveDate,
+  );
 
   // HARD BLOCK — a substitute can NEVER be double-booked at the same
   // day+period in another section, regardless of the force flag.

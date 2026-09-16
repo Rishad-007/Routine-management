@@ -15,6 +15,7 @@ import { RoomsTab } from "./rooms-tab";
 import { SubjectsTab } from "./subjects-tab";
 import { TeachersTab } from "./teachers-tab";
 import { AdminsTab } from "./admins-tab";
+import { ImportTab } from "./import-tab";
 
 interface MasterDataTabsProps {
   classes: ClassRow[];
@@ -36,6 +37,7 @@ export function MasterDataTabs(props: MasterDataTabsProps) {
         <TabsTrigger value="subjects">Subjects</TabsTrigger>
         <TabsTrigger value="teachers">Teachers</TabsTrigger>
         <TabsTrigger value="admins">Admins</TabsTrigger>
+        <TabsTrigger value="import">Import JSON</TabsTrigger>
       </TabsList>
 
       <TabsContent value="classes">
@@ -59,10 +61,15 @@ export function MasterDataTabs(props: MasterDataTabsProps) {
           teachers={props.teachers}
           subjects={props.subjects}
           teacherSubjects={props.teacherSubjects}
+          sections={props.sections}
+          classes={props.classes}
         />
       </TabsContent>
       <TabsContent value="admins">
         <AdminsTab admins={props.admins} />
+      </TabsContent>
+      <TabsContent value="import">
+        <ImportTab />
       </TabsContent>
     </Tabs>
   );

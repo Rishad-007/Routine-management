@@ -38,12 +38,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { createTeacher, updateTeacher, deleteTeacher } from "@/app/admin/master-data/actions";
 import { cn } from "@/lib/utils";
-import type { TeacherRow, SubjectRow, TeacherSubjectRow } from "@/lib/types";
+import type { TeacherRow, SubjectRow, TeacherSubjectRow, SectionRow, ClassRow } from "@/lib/types";
 
 interface Props {
   teachers: TeacherRow[];
   subjects: SubjectRow[];
   teacherSubjects: TeacherSubjectRow[];
+  sections: SectionRow[];
+  classes: ClassRow[];
 }
 
 interface FormState {
@@ -53,6 +55,8 @@ interface FormState {
   isOpenTeacher: boolean;
   primarySubjectId: string;
   subjectIds: string[];
+  designation: string;
+  classTeacherSectionId: string;
 }
 
 const emptyForm: FormState = {
@@ -62,9 +66,11 @@ const emptyForm: FormState = {
   isOpenTeacher: false,
   primarySubjectId: "",
   subjectIds: [],
+  designation: "",
+  classTeacherSectionId: "",
 };
 
-export function TeachersTab({ teachers, subjects, teacherSubjects }: Props) {
+export function TeachersTab({ teachers, subjects, teacherSubjects, sections, classes }: Props) {
   const [query, setQuery] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -73,6 +79,13 @@ export function TeachersTab({ teachers, subjects, teacherSubjects }: Props) {
   const [pending, startTransition] = useTransition();
 
   const subjectMap = Object.fromEntries(subjects.map((s) => [s.id, s]));
+  const sectionLabel = (sectionId: string | null): string | null => {
+    if (!sectionId) return null;
+    const section = sections.find((s) => s.id === sectionId);
+    if (!section) return null;
+    const classRow = classes.find((c) => c.id === section.class_id);
+    return classRow ? `${classRow.name}-${section.name}` : section.name;
+  };
   const subjectsByTeacher = new Map<string, string[]>();
   for (const ts of teacherSubjects) {
     const arr = subjectsByTeacher.get(ts.teacher_id) ?? [];
@@ -111,6 +124,8 @@ export function TeachersTab({ teachers, subjects, teacherSubjects }: Props) {
       isOpenTeacher: t.is_open_teacher,
       primarySubjectId: t.primary_subject_id ?? "",
       subjectIds: subjectsByTeacher.get(t.id) ?? [],
+      designation: t.designation ?? "",
+      classTeacherSectionId: t.class_teacher_section_id ?? "",
     });
     setFormOpen(true);
   }
@@ -124,6 +139,8 @@ export function TeachersTab({ teachers, subjects, teacherSubjects }: Props) {
         isOpenTeacher: form.isOpenTeacher,
         primarySubjectId: form.primarySubjectId || null,
         subjectIds: form.subjectIds,
+        designation: form.designation,
+        classTeacherSectionId: form.classTeacherSectionId || null,
       };
       const res = editingId
         ? await updateTeacher(editingId, payload)
@@ -175,6 +192,14 @@ export function TeachersTab({ teachers, subjects, teacherSubjects }: Props) {
                   <p className="font-medium text-[#1e3a5f]">{t.full_name}</p>
                   {t.is_open_teacher && (
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Open</span>
+                  )}
+                  {t.designation && (
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{t.designation}</span>
+                  )}
+                  {t.class_teacher_section_id && sectionLabel(t.class_teacher_section_id) && (
+                    <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700">
+                      Class Teacher · {sectionLabel(t.class_teacher_section_id)}
+                    </span>
                   )}
                 </div>
                 <p className="text-xs text-slate-500">
@@ -243,6 +268,53 @@ export function TeachersTab({ teachers, subjects, teacherSubjects }: Props) {
                 <SelectContent>
                   {subjects.map((s) => (
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Designation</Label>
+              <Select
+                value={form.designation}
+                onValueChange={(v) => setForm({ ...form, designation: v ?? "" })}
+                items={[
+                  { value: "", label: "None" },
+                  { value: "Senior Teacher", label: "Senior Teacher" },
+                  { value: "Assistant Teacher", label: "Assistant Teacher" },
+                ]}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Optional" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="Senior Teacher">Senior Teacher</SelectItem>
+                  <SelectItem value="Assistant Teacher">Assistant Teacher</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Class teacher of</Label>
+              <Select
+                value={form.classTeacherSectionId}
+                onValueChange={(v) => setForm({ ...form, classTeacherSectionId: v ?? "" })}
+                items={[
+                  { value: "", label: "None" },
+                  ...sections.map((s) => ({
+                    value: s.id,
+                    label: sectionLabel(s.id) ?? s.name,
+                  })),
+                ]}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Optional" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">None</SelectItem>
+                  {sections.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {sectionLabel(s.id) ?? s.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>

@@ -1,7 +1,28 @@
 import { TIFFIN_AFTER_PERIOD } from "./constants";
-import type { RoutineRow } from "./types";
+import type { AdjustmentRow, RoutineRow } from "./types";
 
 export type WarningLevel = "yellow" | "red" | "ok";
+
+/** Apply date-scoped substitutions to a weekly routine snapshot. */
+export function applyAdjustmentsToRoutines(
+  routines: RoutineRow[],
+  adjustments: AdjustmentRow[],
+  adjustDate: string,
+): RoutineRow[] {
+  const byCell = new Map(
+    adjustments
+      .filter((a) => a.adjust_date === adjustDate)
+      .map((a) => [`${a.section_id}:${a.period_number}:${a.is_tag}`, a]),
+  );
+
+  return routines.map((routine) => {
+    const adjustment = byCell.get(
+      `${routine.section_id}:${routine.period_number}:${routine.is_tag}`,
+    );
+    if (!adjustment?.new_teacher_id) return routine;
+    return { ...routine, teacher_id: adjustment.new_teacher_id };
+  });
+}
 
 export interface TeacherDayLoad {
   teacherId: string;
@@ -16,12 +37,12 @@ export interface TeacherDayLoad {
 export function countDayPeriods(
   routines: RoutineRow[],
   teacherId: string,
-  day: number
+  day: number,
 ): number {
   const periods = new Set(
     routines
       .filter((r) => r.day === day && r.teacher_id === teacherId)
-      .map((r) => r.period_number)
+      .map((r) => r.period_number),
   );
   return periods.size;
 }
@@ -30,20 +51,23 @@ export function countDayPeriods(
 export function longestConsecutiveStretch(
   routines: RoutineRow[],
   teacherId: string,
-  day: number
+  day: number,
 ): number {
-  const periods = [...new Set(
-    routines
-      .filter((r) => r.day === day && r.teacher_id === teacherId)
-      .map((r) => r.period_number)
-  )].sort((a, b) => a - b);
+  const periods = [
+    ...new Set(
+      routines
+        .filter((r) => r.day === day && r.teacher_id === teacherId)
+        .map((r) => r.period_number),
+    ),
+  ].sort((a, b) => a - b);
 
   let best = 0;
   let run = 0;
   let prev = 0;
   for (const p of periods) {
     // period 4 -> 5 has a tiffin gap, so it resets the run
-    const contiguous = run > 0 && p === prev + 1 && p !== TIFFIN_AFTER_PERIOD + 1;
+    const contiguous =
+      run > 0 && p === prev + 1 && p !== TIFFIN_AFTER_PERIOD + 1;
     run = contiguous ? run + 1 : 1;
     prev = p;
     if (run > best) best = run;
@@ -59,10 +83,14 @@ export function longestConsecutiveStretch(
 export function teacherDayLoad(
   routines: RoutineRow[],
   teacherId: string,
-  day: number
+  day: number,
 ): TeacherDayLoad {
   const periodCount = countDayPeriods(routines, teacherId, day);
-  const consecutiveStretch = longestConsecutiveStretch(routines, teacherId, day);
+  const consecutiveStretch = longestConsecutiveStretch(
+    routines,
+    teacherId,
+    day,
+  );
 
   let level: WarningLevel = "ok";
   const reasons: string[] = [];
@@ -95,26 +123,28 @@ export function isTeacherBusy(
   teacherId: string,
   day: number,
   period: number,
-  excludeRoutineId?: string
+  excludeRoutineId?: string,
 ): boolean {
   return routines.some(
     (r) =>
       r.teacher_id === teacherId &&
       r.day === day &&
       r.period_number === period &&
-      r.id !== excludeRoutineId
+      r.id !== excludeRoutineId,
   );
 }
 
 /** Aggregate load map for all teachers across the routine set. */
 export function allTeacherLoads(
-  routines: RoutineRow[]
+  routines: RoutineRow[],
 ): Map<string, TeacherDayLoad[]> {
   const map = new Map<string, TeacherDayLoad[]>();
   const teachers = new Set(routines.map((r) => r.teacher_id).filter(Boolean));
   for (const t of Array.from(teachers)) {
     if (!t) continue;
-    const days = new Set(routines.filter((r) => r.teacher_id === t).map((r) => r.day));
+    const days = new Set(
+      routines.filter((r) => r.teacher_id === t).map((r) => r.day),
+    );
     const loads: TeacherDayLoad[] = [];
     for (const d of Array.from(days)) {
       loads.push(teacherDayLoad(routines, t, d));
@@ -145,18 +175,23 @@ export function simulateTeacherAssignment(
   teacherId: string,
   day: number,
   period: number,
-  excludeSectionId?: string
+  excludeSectionId?: string,
 ): AssignmentSimulation {
   const existingCell = routines.find(
     (r) =>
       r.day === day &&
       r.period_number === period &&
       (excludeSectionId ? r.section_id === excludeSectionId : true) &&
-      r.teacher_id !== teacherId
+      r.teacher_id !== teacherId,
   );
 
   const simulated = routines.filter(
-    (r) => !(r.day === day && r.period_number === period && r.section_id === existingCell?.section_id)
+    (r) =>
+      !(
+        r.day === day &&
+        r.period_number === period &&
+        r.section_id === existingCell?.section_id
+      ),
   );
 
   const count = countDayPeriods(simulated, teacherId, day);
@@ -184,7 +219,11 @@ export function simulateTeacherAssignment(
   const isRed = busy || count >= 5 || stretch >= 4;
   const isYellow = !isRed && (count >= 4 || stretch >= 3);
 
-  const level: "ok" | "yellow" | "red" = isRed ? "red" : isYellow ? "yellow" : "ok";
+  const level: "ok" | "yellow" | "red" = isRed
+    ? "red"
+    : isYellow
+      ? "yellow"
+      : "ok";
 
   return { level, reasons, count: count + 1, stretch: stretch + 1 };
 }
@@ -199,7 +238,7 @@ export interface WeeklyLoad {
 /** Weekly + per-day load summary for a teacher (useful for the assignment sidebar). */
 export function weeklyLoad(
   routines: RoutineRow[],
-  teacherId: string
+  teacherId: string,
 ): WeeklyLoad {
   const perDay: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 };
   const countedPeriods = new Map<number, Set<number>>();
@@ -214,8 +253,8 @@ export function weeklyLoad(
     }
   }
   const total = Object.values(perDay).reduce((a, b) => a + b, 0);
-  const todayLevels = [0, 1, 2, 3, 4].map((d) =>
-    teacherDayLoad(routines, teacherId, d).level
+  const todayLevels = [0, 1, 2, 3, 4].map(
+    (d) => teacherDayLoad(routines, teacherId, d).level,
   );
   return { teacherId, perDay, total, todayLevels };
 }
