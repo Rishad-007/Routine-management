@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { periodRangesForClassName } from "@/lib/class-period-rules";
+import type { RoomRow } from "@/lib/types";
 
 // ---------------- Classes ----------------
 
@@ -63,19 +64,59 @@ export async function deleteClass(id: string) {
 
 // ---------------- Sections ----------------
 
+/**
+ * A section's room: either one that already exists, or a name to create on the
+ * spot. Creating and assigning in one action avoids leaving a stray room behind
+ * when the section insert fails, and saves a round trip before the new room is
+ * selectable.
+ */
+export type RoomChoice =
+  | { kind: "existing"; id: string }
+  | { kind: "new"; name: string };
+
+type AdminClient = Awaited<ReturnType<typeof authed>>["admin"];
+
+async function resolveRoom(
+  admin: AdminClient,
+  room: RoomChoice,
+): Promise<{ roomId: string } | { error: string }> {
+  if (room.kind === "existing") {
+    return room.id
+      ? { roomId: room.id }
+      : { error: "A fixed room is required for every section." };
+  }
+
+  const trimmed = room.name.trim();
+  if (!trimmed) return { error: "A fixed room is required for every section." };
+
+  // rooms.name is UNIQUE, so upsert makes this find-or-create: typing an
+  // existing name reuses that room instead of failing on the constraint.
+  const { data, error } = await admin
+    .from("rooms")
+    .upsert({ name: trimmed }, { onConflict: "name" })
+    .select("id")
+    .single();
+  if (error) return { error: error.message };
+  if (!data) return { error: `Could not create room "${trimmed}".` };
+  return { roomId: data.id as string };
+}
+
 export async function createSection(
   classId: string,
   name: string,
-  roomId: string | null,
+  room: RoomChoice,
   fixedRoom: boolean
 ) {
   const { admin } = await authed();
   const trimmed = name.trim();
   if (!classId || !trimmed) return { error: "Class and section name are required." };
-  if (!roomId) return { error: "A fixed room is required for every section." };
+
+  const resolved = await resolveRoom(admin, room);
+  if ("error" in resolved) return resolved;
+
   const { error } = await admin
     .from("sections")
-    .insert({ class_id: classId, name: trimmed, room_id: roomId, fixed_room: fixedRoom });
+    .insert({ class_id: classId, name: trimmed, room_id: resolved.roomId, fixed_room: fixedRoom });
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
   return { success: true };
@@ -85,16 +126,19 @@ export async function updateSection(
   id: string,
   classId: string,
   name: string,
-  roomId: string | null,
+  room: RoomChoice,
   fixedRoom: boolean
 ) {
   const { admin } = await authed();
   const trimmed = name.trim();
   if (!classId || !trimmed) return { error: "Class and section name are required." };
-  if (!roomId) return { error: "A fixed room is required for every section." };
+
+  const resolved = await resolveRoom(admin, room);
+  if ("error" in resolved) return resolved;
+
   const { error } = await admin
     .from("sections")
-    .update({ class_id: classId, name: trimmed, room_id: roomId, fixed_room: fixedRoom })
+    .update({ class_id: classId, name: trimmed, room_id: resolved.roomId, fixed_room: fixedRoom })
     .eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
@@ -115,10 +159,16 @@ export async function createRoom(name: string) {
   const { admin } = await authed();
   const trimmed = name.trim();
   if (!trimmed) return { error: "Room name is required." };
-  const { error } = await admin.from("rooms").insert({ name: trimmed });
+  // upsert, not insert: rooms.name is UNIQUE, so this is find-or-create and is
+  // idempotent under a double-click. Returns the row so callers can assign it.
+  const { data, error } = await admin
+    .from("rooms")
+    .upsert({ name: trimmed }, { onConflict: "name" })
+    .select("id, name")
+    .single();
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
-  return { success: true };
+  return { success: true, room: data as RoomRow };
 }
 
 export async function updateRoom(id: string, name: string) {

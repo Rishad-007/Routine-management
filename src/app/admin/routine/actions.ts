@@ -2,9 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
-import { allTeacherLoads, isTeacherBusy } from "@/lib/conflicts";
+import {
+  allTeacherLoadsIndexed,
+  buildRoutineIndex,
+  isTeacherBusy,
+} from "@/lib/conflicts";
 import { isPeriodAllowed, describePeriodRange } from "@/lib/class-period-rules";
-import { getClassPeriodRules, getClasses, getSections } from "@/lib/data";
+import {
+  fetchAllRows,
+  getClassPeriodRules,
+  getClasses,
+  getSections,
+  type PagedQuery,
+} from "@/lib/data";
 import { DAY_LABELS, type RoutineRow } from "@/lib/types";
 
 export interface MatrixEdit {
@@ -67,16 +77,26 @@ export async function saveSectionRoutine(
   if (tErr) return { error: tErr.message };
   for (const t of teachers ?? []) teacherNames.set(t.id, t.short_name);
 
-  // Existing routines for all sections (for conflict checks).
-  const { data: allRoutines, error: rErr } = await admin
-    .from("routines")
-    .select(
-      "id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag",
+  // Existing routines for all sections (for conflict checks). Must be paged —
+  // an unbounded select returns only the first 1000 of 3000+ rows, which would
+  // make this check pass while the DB trigger still rejects the write.
+  let allRoutines: RoutineRow[];
+  try {
+    allRoutines = await fetchAllRows<RoutineRow>(
+      () =>
+        admin
+          .from("routines")
+          .select(
+            "id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag",
+            { count: "exact" },
+          ) as unknown as PagedQuery<RoutineRow>,
     );
-  if (rErr) return { error: rErr.message };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not load routines." };
+  }
 
   // Build simulated routine set: other sections as-is + this section's new rows.
-  const others = (allRoutines ?? []).filter((r) => r.section_id !== sectionId);
+  const others = allRoutines.filter((r) => r.section_id !== sectionId);
   const newRows: RoutineRow[] = edits.map((e, i) => ({
     id: `new-${i}`,
     section_id: sectionId,
@@ -115,7 +135,9 @@ export async function saveSectionRoutine(
   }
 
   // 2) Overload: a teacher exceeds yellow/red daily threshold in the simulation.
-  const loads = allTeacherLoads(simulated);
+  // Indexed: the scanning variant is O(teachers x days x rows), which is ~5M
+  // row visits now that reads return the full 3000+ rows.
+  const loads = allTeacherLoadsIndexed(buildRoutineIndex(simulated));
   for (const [teacherId, dayLoads] of loads) {
     for (const dl of dayLoads) {
       if (dl.level !== "ok") {
@@ -156,6 +178,11 @@ export async function saveSectionRoutine(
   }
 
   // --- Persist ---
+  // supabase-js has no transactions, so this is delete-then-insert across three
+  // round trips. Snapshot the section first: if any later step fails we restore
+  // it, rather than leaving the section's whole week wiped.
+  const snapshot = await snapshotSection(admin, sectionId);
+
   const { error: delErr } = await admin
     .from("routine_slots")
     .delete()
@@ -175,7 +202,10 @@ export async function saveSectionRoutine(
       }),
     )
     .select("id, day, period_number");
-  if (slotErr) return { error: slotErr.message };
+  if (slotErr) {
+    await restoreSection(admin, sectionId, snapshot);
+    return { error: slotErr.message };
+  }
 
   const slotByKey = new Map(
     (slots ?? []).map((slot) => [`${slot.day}:${slot.period_number}`, slot.id]),
@@ -192,10 +222,16 @@ export async function saveSectionRoutine(
     const { error: insErr } = await admin
       .from("routine_assignments")
       .insert(insertRows);
-    if (insErr) return { error: insErr.message };
+    if (insErr) {
+      await restoreSection(admin, sectionId, snapshot);
+      return { error: insErr.message };
+    }
   }
 
+  revalidatePath("/admin");
   revalidatePath("/admin/routine");
+  revalidatePath("/admin/adjust");
+  revalidatePath("/admin/free-teachers");
   revalidatePath("/");
   revalidatePath("/routine");
   revalidatePath("/teacher");
@@ -204,4 +240,90 @@ export async function saveSectionRoutine(
     savedCount: insertRows.length,
     warnings: uniqueWarnings,
   };
+}
+
+type AdminClient = Awaited<ReturnType<typeof authed>>["admin"];
+
+interface SectionSnapshot {
+  slots: { day: number; period_number: number }[];
+  assignments: {
+    day: number;
+    period_number: number;
+    assignment_role: string;
+    teacher_id: string | null;
+    subject_id: string | null;
+    room_id: string | null;
+  }[];
+}
+
+/** Capture a section's current week so a failed save can be rolled back. */
+async function snapshotSection(
+  admin: AdminClient,
+  sectionId: string,
+): Promise<SectionSnapshot> {
+  const { data } = await admin
+    .from("routine_slots")
+    .select(
+      "day, period_number, routine_assignments(assignment_role, teacher_id, subject_id, room_id)",
+    )
+    .eq("section_id", sectionId);
+
+  const slots: SectionSnapshot["slots"] = [];
+  const assignments: SectionSnapshot["assignments"] = [];
+  for (const slot of data ?? []) {
+    slots.push({ day: slot.day, period_number: slot.period_number });
+    for (const a of slot.routine_assignments ?? []) {
+      assignments.push({
+        day: slot.day,
+        period_number: slot.period_number,
+        assignment_role: a.assignment_role,
+        teacher_id: a.teacher_id,
+        subject_id: a.subject_id,
+        room_id: a.room_id,
+      });
+    }
+  }
+  return { slots, assignments };
+}
+
+/**
+ * Put a snapshotted section back after a failed save. Best-effort compensation,
+ * not a transaction: it cannot survive a process crash mid-save, but it does
+ * stop an ordinary error (a trigger rejection, a concurrent writer) from
+ * leaving the section's whole week deleted.
+ */
+async function restoreSection(
+  admin: AdminClient,
+  sectionId: string,
+  snapshot: SectionSnapshot,
+): Promise<void> {
+  if (snapshot.slots.length === 0) return;
+
+  await admin.from("routine_slots").delete().eq("section_id", sectionId);
+
+  const { data: restored } = await admin
+    .from("routine_slots")
+    .insert(
+      snapshot.slots.map((s) => ({
+        section_id: sectionId,
+        day: s.day,
+        period_number: s.period_number,
+      })),
+    )
+    .select("id, day, period_number");
+  if (!restored?.length) return;
+
+  const byKey = new Map(
+    restored.map((s) => [`${s.day}:${s.period_number}`, s.id]),
+  );
+  const rows = snapshot.assignments
+    .map((a) => ({
+      slot_id: byKey.get(`${a.day}:${a.period_number}`),
+      assignment_role: a.assignment_role,
+      teacher_id: a.teacher_id,
+      subject_id: a.subject_id,
+      room_id: a.room_id,
+    }))
+    .filter((r) => r.slot_id);
+  if (rows.length > 0) await admin.from("routine_assignments").insert(rows);
 }

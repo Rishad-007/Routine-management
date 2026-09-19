@@ -4,6 +4,7 @@ import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT } from "@/lib/constants";
 import { getSchoolDayIndex } from "@/lib/periods";
+import { fetchAllRows, type PagedQuery } from "@/lib/data";
 import type {
   SectionRow,
   ClassRow,
@@ -123,21 +124,30 @@ async function fetchReportData(date: string) {
   const day = getSchoolDayIndex(new Date(date + "T00:00:00"));
   const dayIndex = day as number;
 
-  const [clsRes, secRes, teaRes, subRes, adjRes, rotRes] = await Promise.all([
-    admin.from("classes").select("*").order("sort_order", { ascending: true }),
-    admin.from("sections").select("*"),
-    admin.from("teachers").select("*").order("full_name"),
-    admin.from("subjects").select("*"),
-    admin.from("adjustments").select("*").eq("adjust_date", date),
-    admin.from("routines").select("*").eq("day", dayIndex),
-  ]);
+  // One weekday of `routines` is ~600 rows today and grows with the section
+  // count — page it so the report never silently loses periods.
+  const [clsRes, secRes, teaRes, subRes, adjRes, dayRoutines] =
+    await Promise.all([
+      admin.from("classes").select("*").order("sort_order", { ascending: true }),
+      admin.from("sections").select("*"),
+      admin.from("teachers").select("*").order("full_name"),
+      admin.from("subjects").select("*"),
+      admin.from("adjustments").select("*").eq("adjust_date", date),
+      fetchAllRows<RoutineRow>(
+        () =>
+          admin
+            .from("routines")
+            .select("*", { count: "exact" })
+            .eq("day", dayIndex) as unknown as PagedQuery<RoutineRow>,
+      ),
+    ]);
 
   const classes = (clsRes.data ?? []) as ClassRow[];
   const sections = (secRes.data ?? []) as SectionRow[];
   const teachers = (teaRes.data ?? []) as TeacherRow[];
   const subjects = (subRes.data ?? []) as SubjectRow[];
   const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
-  const routines = (rotRes.data ?? []) as RoutineRow[];
+  const routines = dayRoutines;
 
   const cls = new Map(classes.map((c) => [c.id, c]));
   const sec = new Map(sections.map((s) => [s.id, s]));

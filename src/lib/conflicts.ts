@@ -76,22 +76,16 @@ export function longestConsecutiveStretch(
 }
 
 /**
- * Compute load + warning level for a teacher on a day.
+ * Grade a day's load.
  * Yellow: continuous 3 periods OR 5 total in a day.
  * Red: continuous 4 periods OR 6 total in a day.
+ *
+ * Shared by the scanning and the indexed variants so the two can never drift.
  */
-export function teacherDayLoad(
-  routines: RoutineRow[],
-  teacherId: string,
-  day: number,
-): TeacherDayLoad {
-  const periodCount = countDayPeriods(routines, teacherId, day);
-  const consecutiveStretch = longestConsecutiveStretch(
-    routines,
-    teacherId,
-    day,
-  );
-
+function gradeDayLoad(
+  periodCount: number,
+  consecutiveStretch: number,
+): { level: WarningLevel; reasons: string[] } {
   let level: WarningLevel = "ok";
   const reasons: string[] = [];
 
@@ -111,6 +105,22 @@ export function teacherDayLoad(
     reasons.push(`${periodCount} periods in a day`);
   }
 
+  return { level, reasons };
+}
+
+/** Compute load + warning level for a teacher on a day. */
+export function teacherDayLoad(
+  routines: RoutineRow[],
+  teacherId: string,
+  day: number,
+): TeacherDayLoad {
+  const periodCount = countDayPeriods(routines, teacherId, day);
+  const consecutiveStretch = longestConsecutiveStretch(
+    routines,
+    teacherId,
+    day,
+  );
+  const { level, reasons } = gradeDayLoad(periodCount, consecutiveStretch);
   return { teacherId, day, periodCount, consecutiveStretch, level, reasons };
 }
 
@@ -132,6 +142,125 @@ export function isTeacherBusy(
       r.period_number === period &&
       r.id !== excludeRoutineId,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Indexed variants
+//
+// The scanning helpers above each walk the whole routine array. Screens that
+// ask about all 167 teachers across 7 periods therefore do millions of row
+// visits per render — fine at the 1000 rows the old truncated reads returned,
+// noticeably slow now that reads are complete (3000+). These build the same
+// answers from a single pass and then answer in O(1).
+// ---------------------------------------------------------------------------
+
+export interface RoutineIndex {
+  /** "day:period" -> ids of teachers occupying it (primary AND tag). */
+  busyAt: Map<string, Set<string>>;
+  /** teacherId -> day -> distinct period numbers taught. */
+  byTeacherDay: Map<string, Map<number, Set<number>>>;
+  /** teacherId -> distinct (day, period) cells across the week. */
+  weeklyTotal: Map<string, number>;
+}
+
+/** Index a routine snapshot in one pass. */
+export function buildRoutineIndex(routines: RoutineRow[]): RoutineIndex {
+  const busyAt = new Map<string, Set<string>>();
+  const byTeacherDay = new Map<string, Map<number, Set<number>>>();
+
+  for (const r of routines) {
+    if (!r.teacher_id) continue;
+
+    const cell = `${r.day}:${r.period_number}`;
+    let occupants = busyAt.get(cell);
+    if (!occupants) busyAt.set(cell, (occupants = new Set()));
+    occupants.add(r.teacher_id);
+
+    let days = byTeacherDay.get(r.teacher_id);
+    if (!days) byTeacherDay.set(r.teacher_id, (days = new Map()));
+    let periods = days.get(r.day);
+    if (!periods) days.set(r.day, (periods = new Set()));
+    periods.add(r.period_number);
+  }
+
+  const weeklyTotal = new Map<string, number>();
+  for (const [teacherId, days] of byTeacherDay) {
+    let total = 0;
+    for (const periods of days.values()) total += periods.size;
+    weeklyTotal.set(teacherId, total);
+  }
+
+  return { busyAt, byTeacherDay, weeklyTotal };
+}
+
+/** Indexed `isTeacherBusy`. Tag sessions count as busy, matching the DB trigger. */
+export function isBusyIndexed(
+  index: RoutineIndex,
+  teacherId: string,
+  day: number,
+  period: number,
+): boolean {
+  return index.busyAt.get(`${day}:${period}`)?.has(teacherId) ?? false;
+}
+
+/** Indexed `countDayPeriods`. */
+export function dayCountIndexed(
+  index: RoutineIndex,
+  teacherId: string,
+  day: number,
+): number {
+  return index.byTeacherDay.get(teacherId)?.get(day)?.size ?? 0;
+}
+
+/** Indexed `longestConsecutiveStretch` — same tiffin rule. */
+export function stretchIndexed(
+  index: RoutineIndex,
+  teacherId: string,
+  day: number,
+): number {
+  const set = index.byTeacherDay.get(teacherId)?.get(day);
+  if (!set) return 0;
+  const periods = [...set].sort((a, b) => a - b);
+
+  let best = 0;
+  let run = 0;
+  let prev = 0;
+  for (const p of periods) {
+    // period 4 -> 5 has a tiffin gap, so it resets the run
+    const contiguous =
+      run > 0 && p === prev + 1 && p !== TIFFIN_AFTER_PERIOD + 1;
+    run = contiguous ? run + 1 : 1;
+    prev = p;
+    if (run > best) best = run;
+  }
+  return best;
+}
+
+/** Indexed `teacherDayLoad`. */
+export function teacherDayLoadIndexed(
+  index: RoutineIndex,
+  teacherId: string,
+  day: number,
+): TeacherDayLoad {
+  const periodCount = dayCountIndexed(index, teacherId, day);
+  const consecutiveStretch = stretchIndexed(index, teacherId, day);
+  const { level, reasons } = gradeDayLoad(periodCount, consecutiveStretch);
+  return { teacherId, day, periodCount, consecutiveStretch, level, reasons };
+}
+
+/** Indexed `allTeacherLoads` — same shape, one pass instead of O(teachers x days x rows). */
+export function allTeacherLoadsIndexed(
+  index: RoutineIndex,
+): Map<string, TeacherDayLoad[]> {
+  const map = new Map<string, TeacherDayLoad[]>();
+  for (const [teacherId, days] of index.byTeacherDay) {
+    const loads: TeacherDayLoad[] = [];
+    for (const day of days.keys()) {
+      loads.push(teacherDayLoadIndexed(index, teacherId, day));
+    }
+    map.set(teacherId, loads);
+  }
+  return map;
 }
 
 /** Aggregate load map for all teachers across the routine set. */

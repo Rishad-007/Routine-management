@@ -8,6 +8,8 @@ import {
   Database,
   CalendarRange,
   SlidersHorizontal,
+  UserCheck,
+  UserPlus,
   Globe,
   LogOut,
 } from "lucide-react";
@@ -18,6 +20,8 @@ const NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/master-data", label: "Update Database", icon: Database },
   { href: "/admin/routine", label: "Update Routine", icon: CalendarRange },
+  { href: "/admin/assign", label: "Assign Classes", icon: UserPlus },
+  { href: "/admin/free-teachers", label: "Free Teachers", icon: UserCheck },
   { href: "/admin/adjust", label: "Adjust Routine", icon: SlidersHorizontal },
 ];
 

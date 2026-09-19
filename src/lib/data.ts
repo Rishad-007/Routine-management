@@ -19,7 +19,76 @@ async function db() {
   return createClient();
 }
 
-// ---------------- Master data reads (admin client = bypass RLS on server) ----------------
+// ---------------- Paged reads ----------------
+
+/**
+ * PostgREST caps every response at the project's "Max rows" setting
+ * (Supabase default: 1000) and does NOT report that it truncated — the array
+ * simply ends early. `routine_assignments` alone is 3000+ rows, so an
+ * unbounded .select() silently hides two thirds of the school's routine.
+ *
+ * Structural typing (rather than PostgrestFilterBuilder, which carries eight
+ * generic parameters) keeps this usable with both the anon SSR client and the
+ * service-role client used by the PDF routes and server actions.
+ */
+interface PagedResponse<T> {
+  data: T[] | null;
+  error: { message: string } | null;
+  count: number | null;
+}
+
+export interface PagedQuery<T> {
+  order(
+    column: string,
+    options: { ascending: boolean },
+  ): { range(from: number, to: number): PromiseLike<PagedResponse<T>> };
+}
+
+/**
+ * Read every row of a query, one page at a time.
+ *
+ * `makeQuery` must be a thunk: a Postgrest query builder is a single-use
+ * thenable, so building it once and awaiting it twice replays the cached first
+ * response. Its select() must pass `{ count: "exact" }`.
+ *
+ * Paging needs a stable total order — Postgres gives no ordering guarantee for
+ * LIMIT/OFFSET, `synchronize_seqscans` is on by default, and `routines` is a
+ * join view whose plan can change between requests, so an unordered page walk
+ * both skips and duplicates rows. Order on a primary key.
+ */
+export async function fetchAllRows<T>(
+  makeQuery: () => PagedQuery<T>,
+  orderColumn = "id",
+  pageSize = 1000,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let total: number | null = null;
+
+  // Guard against a server that keeps returning rows we have already counted.
+  for (let page = 0; page < 500; page++) {
+    const { data, error, count } = await makeQuery()
+      .order(orderColumn, { ascending: true })
+      .range(rows.length, rows.length + pageSize - 1);
+    if (error) throw new Error(error.message);
+    if (total === null) total = count;
+
+    const batch = data ?? [];
+    if (batch.length === 0) break;
+    rows.push(...batch);
+
+    // Terminate on the exact count rather than `batch.length < pageSize`: if a
+    // project's Max rows is ever set below pageSize, the length test would exit
+    // after the first page and silently reinstate the truncation bug.
+    if (total !== null && rows.length >= total) break;
+  }
+
+  return rows;
+}
+
+// ---------------- Master data reads ----------------
+// NOTE: db() is the anon-key SSR client, not the service-role client — these
+// reads depend on the "Public read" RLS policies in supabase/schema.sql. A table
+// without such a policy returns [] rather than an error.
 
 export async function getClasses(): Promise<ClassRow[]> {
   const { data, error } = await (await db())
@@ -85,11 +154,12 @@ export async function getTeacherSubjects(): Promise<TeacherSubjectRow[]> {
 }
 
 export async function getRoutines(sectionId?: string): Promise<RoutineRow[]> {
-  let q = (await db()).from("routines").select("*");
-  if (sectionId) q = q.eq("section_id", sectionId);
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
-  return (data as RoutineRow[]) ?? [];
+  const client = await db();
+  return fetchAllRows<RoutineRow>(() => {
+    let q = client.from("routines").select("*", { count: "exact" });
+    if (sectionId) q = q.eq("section_id", sectionId);
+    return q as unknown as PagedQuery<RoutineRow>;
+  });
 }
 
 export async function getAdjustments(): Promise<AdjustmentRow[]> {
@@ -109,12 +179,16 @@ export async function getAdjustments(): Promise<AdjustmentRow[]> {
  * getAdjustments() (>= today) so the routine rolls back automatically.
  */
 export async function getAllAdjustments(): Promise<AdjustmentRow[]> {
-  const { data, error } = await (await db())
-    .from("adjustments")
-    .select("*")
-    .order("adjust_date", { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data as AdjustmentRow[]) ?? [];
+  const client = await db();
+  // Page on the primary key — adjust_date is not unique, so it cannot give the
+  // stable total order paging requires. Sort by date afterwards.
+  const rows = await fetchAllRows<AdjustmentRow>(
+    () =>
+      client
+        .from("adjustments")
+        .select("*", { count: "exact" }) as unknown as PagedQuery<AdjustmentRow>,
+  );
+  return rows.sort((a, b) => b.adjust_date.localeCompare(a.adjust_date));
 }
 
 export async function getSettings(): Promise<SettingsRow[]> {

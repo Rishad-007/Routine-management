@@ -52,11 +52,11 @@ import {
 import { getSchoolDayIndex, getTodayLocal } from "@/lib/periods";
 import {
   applyAdjustmentsToRoutines,
-  countDayPeriods,
-  weeklyLoad,
+  buildRoutineIndex,
+  dayCountIndexed,
+  isBusyIndexed,
   simulateTeacherAssignment,
-  isTeacherBusy,
-  longestConsecutiveStretch,
+  stretchIndexed,
 } from "@/lib/conflicts";
 import {
   isPeriodAllowed,
@@ -178,9 +178,27 @@ export function AdjustBuilder({
     [date],
   );
 
-  const effectiveRoutines = useMemo(
-    () => applyAdjustmentsToRoutines(routines, adjustments, date),
-    [routines, adjustments, date],
+  // Substitutions are date-scoped, so only this weekday's rows may be
+  // overlaid. applyAdjustmentsToRoutines keys on section+period+is_tag without
+  // a day, so handing it the whole week would rewrite the same section/period
+  // on every other day as well.
+  const effectiveRoutines = useMemo(() => {
+    if (dayIndex === null) return routines;
+    return [
+      ...routines.filter((r) => r.day !== dayIndex),
+      ...applyAdjustmentsToRoutines(
+        routines.filter((r) => r.day === dayIndex),
+        adjustments,
+        date,
+      ),
+    ];
+  }, [routines, adjustments, date, dayIndex]);
+
+  // One pass over the (now complete) routine set; every free/busy and load
+  // lookup below reads from this instead of rescanning 3000+ rows per teacher.
+  const effectiveIndex = useMemo(
+    () => buildRoutineIndex(effectiveRoutines),
+    [effectiveRoutines],
   );
 
   const subjectMap = useMemo(
@@ -452,10 +470,10 @@ export function AdjustBuilder({
     const map = new Map<string, number>();
     if (dayIndex === null) return map;
     for (const t of teachers) {
-      map.set(t.id, countDayPeriods(effectiveRoutines, t.id, dayIndex));
+      map.set(t.id, dayCountIndexed(effectiveIndex, t.id, dayIndex));
     }
     return map;
-  }, [teachers, effectiveRoutines, dayIndex]);
+  }, [teachers, effectiveIndex, dayIndex]);
 
   // Per-teacher stats for the active day: class count + longest continuous
   // stretch. Used by the teacher rail and the assignment sheet.
@@ -464,38 +482,32 @@ export function AdjustBuilder({
     if (dayIndex === null) return map;
     for (const t of teachers) {
       map.set(t.id, {
-        count: countDayPeriods(effectiveRoutines, t.id, dayIndex),
-        stretch: longestConsecutiveStretch(effectiveRoutines, t.id, dayIndex),
+        count: dayCountIndexed(effectiveIndex, t.id, dayIndex),
+        stretch: stretchIndexed(effectiveIndex, t.id, dayIndex),
       });
     }
     return map;
-  }, [teachers, effectiveRoutines, dayIndex]);
+  }, [teachers, effectiveIndex, dayIndex]);
 
   const freeTeachersForSheet = useMemo(() => {
     if (sheetPeriod === null || dayIndex === null) return [];
     return teachers
-      .map((t) => {
-        const dayCount = countDayPeriods(effectiveRoutines, t.id, dayIndex);
-        const stretch = longestConsecutiveStretch(
-          effectiveRoutines,
-          t.id,
-          dayIndex,
-        );
-        const week = weeklyLoad(effectiveRoutines, t.id);
-        const busy = isTeacherBusy(
-          effectiveRoutines,
-          t.id,
-          dayIndex,
-          sheetPeriod,
-        );
-        return { ...t, dayCount, stretch, weekTotal: week.total, busy };
-      })
+      .map((t) => ({
+        ...t,
+        dayCount: dayCountIndexed(effectiveIndex, t.id, dayIndex),
+        stretch: stretchIndexed(effectiveIndex, t.id, dayIndex),
+        weekTotal: effectiveIndex.weeklyTotal.get(t.id) ?? 0,
+        busy: isBusyIndexed(effectiveIndex, t.id, dayIndex, sheetPeriod),
+      }))
       .sort(
         (a, b) =>
           Number(a.busy) - Number(b.busy) ||
+          Number(b.is_open_teacher) - Number(a.is_open_teacher) ||
+          a.dayCount - b.dayCount ||
+          a.weekTotal - b.weekTotal ||
           a.short_name.localeCompare(b.short_name),
       );
-  }, [teachers, effectiveRoutines, dayIndex, sheetPeriod]);
+  }, [teachers, effectiveIndex, dayIndex, sheetPeriod]);
 
   const filteredFreeTeachers = useMemo(() => {
     if (!sheetSearch.trim()) return freeTeachersForSheet;
@@ -551,7 +563,7 @@ export function AdjustBuilder({
 
     // HARD BLOCK: the substitute is already teaching another class at this
     // day+period. This is a double-booking and cannot be force-approved.
-    if (isTeacherBusy(effectiveRoutines, newTeacherId, dayIndex!, period)) {
+    if (isBusyIndexed(effectiveIndex, newTeacherId, dayIndex!, period)) {
       toast.error(
         "This teacher already has a class in another section at this period. Free them first before assigning.",
       );

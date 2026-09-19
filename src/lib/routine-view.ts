@@ -70,21 +70,20 @@ export function buildSectionMatrix(
   const roomName = (id: string | null) =>
     id ? lookups.rooms.find((r) => r.id === id)?.name : undefined;
 
+  // Bucket by day:period regardless of role. The `routines` view has no
+  // guaranteed order, so keying a tag off an already-seen primary would drop
+  // any tag row that happens to arrive first — which is most of them.
   const byDayPeriod = new Map<
     string,
-    { primary: RoutineRow; tag: RoutineRow | null }
+    { primary: RoutineRow | null; tag: RoutineRow | null }
   >();
   for (const r of routines) {
     if (r.section_id !== sectionId) continue;
     const key = `${r.day}:${r.period_number}`;
-    if (r.is_tag) {
-      const existing = byDayPeriod.get(key);
-      if (existing) existing.tag = r;
-    } else {
-      if (!byDayPeriod.has(key))
-        byDayPeriod.set(key, { primary: r, tag: null });
-      byDayPeriod.get(key)!.primary = r;
-    }
+    let cell = byDayPeriod.get(key);
+    if (!cell) byDayPeriod.set(key, (cell = { primary: null, tag: null }));
+    if (r.is_tag) cell.tag = r;
+    else cell.primary = r;
   }
 
   for (const [key, { primary, tag }] of byDayPeriod) {
@@ -94,12 +93,19 @@ export function buildSectionMatrix(
 
     if (!matrix[day]) matrix[day] = {};
 
-    let subjectId = primary.subject_id;
-    let teacherId = primary.teacher_id;
-    let roomId = primary.room_id;
+    // A slot normally has a primary. If only a tag survives (its primary was
+    // removed), show the tag in the main position rather than an empty cell.
+    const main = primary ?? tag;
+    const second = primary ? tag : null;
+    if (!main) continue;
+
+    let subjectId = main.subject_id;
+    let teacherId = main.teacher_id;
+    let roomId = main.room_id;
     let isAdjusted = false;
 
-    const pOverride = todayOverrides?.get(`${sectionId}:${day}:${period}`);
+    const mainOverrides = primary ? todayOverrides : tagOverrides;
+    const pOverride = mainOverrides?.get(`${sectionId}:${day}:${period}`);
     if (pOverride) {
       if (pOverride.newTeacherId) teacherId = pOverride.newTeacherId;
       if (pOverride.newSubjectId) subjectId = pOverride.newSubjectId;
@@ -107,14 +113,18 @@ export function buildSectionMatrix(
       isAdjusted = true;
     }
 
-    let subject2 = tag?.subject_id ? subjectShort(tag.subject_id) : undefined;
-    let teacher2 = tag?.teacher_id ? teacherName(tag.teacher_id) : undefined;
-    let room2 = tag?.room_id ? roomName(tag.room_id) : undefined;
-    const isTag = !!tag;
+    let subject2 = second?.subject_id
+      ? subjectShort(second.subject_id)
+      : undefined;
+    let teacher2 = second?.teacher_id
+      ? teacherName(second.teacher_id)
+      : undefined;
+    let room2 = second?.room_id ? roomName(second.room_id) : undefined;
+    const isTag = !!second;
     let isTagAdjusted = false;
 
     const tOverride = tagOverrides?.get(`${sectionId}:${day}:${period}`);
-    if (tag && tOverride) {
+    if (second && tOverride) {
       if (tOverride.newTeacherId)
         teacher2 = teacherName(tOverride.newTeacherId);
       if (tOverride.newSubjectId)

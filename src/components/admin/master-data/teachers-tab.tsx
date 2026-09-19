@@ -1,15 +1,24 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Search, Check, X } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
+  Check,
+  X,
+  CalendarRange,
+} from "lucide-react";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -209,6 +218,13 @@ export function TeachersTab({ teachers, subjects, teacherSubjects, sections, cla
                 </p>
               </div>
               <div className="flex gap-1">
+                <Link
+                  href={`/admin/assign?teacher=${t.id}`}
+                  title="Assign classes"
+                  className={buttonVariants({ variant: "ghost", size: "icon" })}
+                >
+                  <CalendarRange className="h-4 w-4 text-[#0d9488]" />
+                </Link>
                 <Button size="icon" variant="ghost" onClick={() => openEdit(t)}>
                   <Pencil className="h-4 w-4" />
                 </Button>
