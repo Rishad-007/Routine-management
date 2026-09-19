@@ -51,7 +51,11 @@ export function MasterDataTabs(props: MasterDataTabsProps) {
         />
       </TabsContent>
       <TabsContent value="rooms">
-        <RoomsTab rooms={props.rooms} />
+        <RoomsTab
+          rooms={props.rooms}
+          sections={props.sections}
+          classes={props.classes}
+        />
       </TabsContent>
       <TabsContent value="subjects">
         <SubjectsTab subjects={props.subjects} />

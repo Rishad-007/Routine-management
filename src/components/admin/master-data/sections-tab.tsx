@@ -29,6 +29,7 @@ import {
   updateSection,
   deleteSection,
 } from "@/app/admin/master-data/actions";
+import { RoomPicker, type RoomSelection } from "./room-picker";
 import type { SectionRow, ClassRow, RoomRow } from "@/lib/types";
 
 interface Props {
@@ -40,49 +41,58 @@ interface Props {
 export function SectionsTab({ sections, classes, rooms }: Props) {
   const [name, setName] = useState("");
   const [classId, setClassId] = useState("");
-  const [roomId, setRoomId] = useState("");
+  const [room, setRoom] = useState<RoomSelection>(null);
   const [fixed, setFixed] = useState(true);
   const [editing, setEditing] = useState<SectionRow | null>(null);
   const [editName, setEditName] = useState("");
   const [editClass, setEditClass] = useState("");
-  const [editRoom, setEditRoom] = useState("");
+  const [editRoom, setEditRoom] = useState<RoomSelection>(null);
   const [editFixed, setEditFixed] = useState(true);
   const [deleting, setDeleting] = useState<SectionRow | null>(null);
   const [pending, startTransition] = useTransition();
 
   const classMap = Object.fromEntries(classes.map((c) => [c.id, c.name]));
   const roomMap = Object.fromEntries(rooms.map((r) => [r.id, r.name]));
-  const assignedRoomIds = new Set(
-    sections
-      .filter((section) => section.id !== editing?.id && section.room_id)
-      .map((section) => section.room_id),
-  );
-  const availableRooms = rooms.filter((room) => !assignedRoomIds.has(room.id));
+
+  // Which section currently holds each room. Rooms in use are shown and
+  // labelled rather than hidden — 18 rooms here are legitimately shared by two
+  // sections, and filtering them out made them unpickable.
+  const heldBy = new Map<string, string>();
+  for (const section of sections) {
+    if (!section.room_id || section.id === editing?.id) continue;
+    const label = `${classMap[section.class_id] ?? "—"} — ${section.name}`;
+    const existing = heldBy.get(section.room_id);
+    heldBy.set(
+      section.room_id,
+      existing ? `${existing}, ${label}` : label,
+    );
+  }
 
   function handleCreate() {
+    if (!room) return;
     startTransition(async () => {
-      const res = await createSection(classId, name, roomId || null, fixed);
-      if (res?.error) toast.error(res.error);
+      const res = await createSection(classId, name, room, fixed);
+      if ("error" in res) toast.error(res.error);
       else {
         toast.success("Section added");
         setName("");
         setClassId("");
-        setRoomId("");
+        setRoom(null);
       }
     });
   }
 
   function handleUpdate() {
-    if (!editing) return;
+    if (!editing || !editRoom) return;
     startTransition(async () => {
       const res = await updateSection(
         editing.id,
         editClass,
         editName,
-        editRoom || null,
+        editRoom,
         editFixed,
       );
-      if (res?.error) toast.error(res.error);
+      if ("error" in res) toast.error(res.error);
       else {
         toast.success("Section updated");
         setEditing(null);
@@ -139,27 +149,14 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
                 className="w-28"
               />
             </div>
-            <div className="space-y-1">
+            <div className="w-56 space-y-1">
               <Label className="text-xs">Room (required)</Label>
-              <Select
-                value={roomId}
-                onValueChange={(v) => setRoomId(v ?? "")}
-                items={availableRooms.map((r) => ({
-                  value: r.id,
-                  label: r.name,
-                }))}
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Select room" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableRooms.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <RoomPicker
+                rooms={rooms}
+                heldBy={heldBy}
+                value={room}
+                onChange={setRoom}
+              />
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -171,7 +168,7 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
             </label>
             <Button
               onClick={handleCreate}
-              disabled={pending || !classId || !name.trim() || !roomId}
+              disabled={pending || !classId || !name.trim() || !room}
               className="bg-[#0d9488] hover:bg-[#0b7a70]"
             >
               <Plus className="h-4 w-4" /> Add
@@ -208,27 +205,14 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
                     onChange={(e) => setEditName(e.target.value)}
                     className="w-24"
                   />
-                  <Select
-                    value={editRoom}
-                    onValueChange={(v) => setEditRoom(v ?? "")}
-                    items={availableRooms.map((r) => ({
-                      value: r.id,
-                      label: r.name,
-                    }))}
-                  >
-                    <SelectTrigger className="w-40">
-                      <SelectValue>
-                        {editRoom ? roomMap[editRoom] : "Select room"}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableRooms.map((r) => (
-                        <SelectItem key={r.id} value={r.id}>
-                          {r.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="w-56">
+                    <RoomPicker
+                      rooms={rooms}
+                      heldBy={heldBy}
+                      value={editRoom}
+                      onChange={setEditRoom}
+                    />
+                  </div>
                   <label className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -275,7 +259,7 @@ export function SectionsTab({ sections, classes, rooms }: Props) {
                         setEditing(s);
                         setEditName(s.name);
                         setEditClass(s.class_id);
-                        setEditRoom(s.room_id ?? "");
+                        setEditRoom(s.room_id ? { kind: "existing", id: s.room_id } : null);
                         setEditFixed(s.fixed_room);
                       }}
                     >

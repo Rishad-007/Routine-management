@@ -22,14 +22,32 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { createRoom, updateRoom, deleteRoom } from "@/app/admin/master-data/actions";
-import type { RoomRow } from "@/lib/types";
+import type { RoomRow, SectionRow, ClassRow } from "@/lib/types";
 
-export function RoomsTab({ rooms }: { rooms: RoomRow[] }) {
+export function RoomsTab({
+  rooms,
+  sections,
+  classes,
+}: {
+  rooms: RoomRow[];
+  sections: SectionRow[];
+  classes: ClassRow[];
+}) {
   const [name, setName] = useState("");
   const [editing, setEditing] = useState<RoomRow | null>(null);
   const [editName, setEditName] = useState("");
   const [deleting, setDeleting] = useState<RoomRow | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // Rooms may be shared by more than one section, so collect every holder.
+  const classMap = Object.fromEntries(classes.map((c) => [c.id, c.name]));
+  const heldBy = new Map<string, string[]>();
+  for (const section of sections) {
+    if (!section.room_id) continue;
+    const list = heldBy.get(section.room_id) ?? [];
+    list.push(`${classMap[section.class_id] ?? "—"} — ${section.name}`);
+    heldBy.set(section.room_id, list);
+  }
 
   function handleCreate() {
     startTransition(async () => {
@@ -99,7 +117,12 @@ export function RoomsTab({ rooms }: { rooms: RoomRow[] }) {
                 </div>
               ) : (
                 <>
-                  <p className="font-medium text-[#1e3a5f]">{r.name}</p>
+                  <div>
+                    <p className="font-medium text-[#1e3a5f]">{r.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {heldBy.get(r.id)?.join(", ") ?? "Unassigned"}
+                    </p>
+                  </div>
                   <div className="flex gap-1">
                     <Button
                       size="icon"

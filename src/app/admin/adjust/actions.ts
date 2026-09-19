@@ -7,7 +7,13 @@ import {
   simulateTeacherAssignment,
 } from "@/lib/conflicts";
 import { isPeriodAllowed, describePeriodRange } from "@/lib/class-period-rules";
-import { getClassPeriodRules, getClasses, getSections } from "@/lib/data";
+import {
+  fetchAllRows,
+  getClassPeriodRules,
+  getClasses,
+  getSections,
+  type PagedQuery,
+} from "@/lib/data";
 import { getSchoolDayIndex, resolveAdjustDate } from "@/lib/periods";
 import { DAY_LABELS, type AdjustmentRow, type RoutineRow } from "@/lib/types";
 
@@ -141,26 +147,45 @@ export async function saveAllAdjustments(
   const ruleError = await periodRuleError(changes, dayIndex);
   if (ruleError) return { error: ruleError };
 
-  // Fetch all routines for conflict validation.
-  const [
-    { data: allRoutines, error: rErr },
-    { data: dateAdjustments, error: aErr },
-  ] = await Promise.all([
-    admin
-      .from("routines")
-      .select(
-        "id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag, is_adjusted, original_teacher_id",
+  // Fetch all routines for conflict validation. Paged — an unbounded select
+  // returns only the first 1000 of 3000+ rows, which would let a substitute be
+  // double-booked against a row this check never saw.
+  let allRoutines: RoutineRow[];
+  let dateAdjustments: AdjustmentRow[];
+  try {
+    [allRoutines, dateAdjustments] = await Promise.all([
+      fetchAllRows<RoutineRow>(
+        () =>
+          admin
+            .from("routines")
+            .select(
+              "id, section_id, day, period_number, teacher_id, subject_id, room_id, is_tag, is_adjusted, original_teacher_id",
+              { count: "exact" },
+            ) as unknown as PagedQuery<RoutineRow>,
       ),
-    admin.from("adjustments").select("*").eq("adjust_date", effectiveDate),
-  ]);
-  if (rErr) return { error: rErr.message };
-  if (aErr) return { error: aErr.message };
+      fetchAllRows<AdjustmentRow>(
+        () =>
+          admin
+            .from("adjustments")
+            .select("*", { count: "exact" })
+            .eq("adjust_date", effectiveDate) as unknown as PagedQuery<AdjustmentRow>,
+      ),
+    ]);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not load routines." };
+  }
 
-  const routines = applyAdjustmentsToRoutines(
-    (allRoutines ?? []) as RoutineRow[],
-    (dateAdjustments ?? []) as AdjustmentRow[],
-    effectiveDate,
-  );
+  // Scope the overlay to this weekday: applyAdjustmentsToRoutines keys on
+  // section+period+is_tag only, so feeding it the whole week would rewrite the
+  // same section/period on every other day too.
+  const routines = [
+    ...allRoutines.filter((r) => r.day !== dayIndex),
+    ...applyAdjustmentsToRoutines(
+      allRoutines.filter((r) => r.day === dayIndex),
+      dateAdjustments,
+      effectiveDate,
+    ),
+  ];
 
   // HARD BLOCK — a substitute can NEVER be double-booked at the same
   // day+period in another section, regardless of the force flag.

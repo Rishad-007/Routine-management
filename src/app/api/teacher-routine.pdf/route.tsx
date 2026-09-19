@@ -4,6 +4,7 @@ import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT, type Season } from "@/lib/constants";
 import { getTodayLocal } from "@/lib/periods";
+import { fetchAllRows, type PagedQuery } from "@/lib/data";
 import { buildTeacherMatrix, buildTodayOverrides } from "@/lib/routine-view";
 import type {
   SectionRow,
@@ -96,12 +97,18 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient();
   const today = getTodayLocal();
 
-  const [teaRes, clsRes, secRes, rotRes, adjRes, seasonRes] =
+  // `routines` is 3000+ rows — paged, or the PDF silently omits most periods.
+  const [teaRes, clsRes, secRes, allRoutines, adjRes, seasonRes] =
     await Promise.all([
       admin.from("teachers").select("*").eq("id", teacherId).single(),
       admin.from("classes").select("*"),
       admin.from("sections").select("*"),
-      admin.from("routines").select("*"),
+      fetchAllRows<RoutineRow>(
+        () =>
+          admin
+            .from("routines")
+            .select("*", { count: "exact" }) as unknown as PagedQuery<RoutineRow>,
+      ),
       admin.from("adjustments").select("*").eq("adjust_date", today),
       admin.from("settings").select("value").eq("key", "season").maybeSingle(),
     ]);
@@ -113,7 +120,7 @@ export async function GET(req: NextRequest) {
 
   const classes = (clsRes.data ?? []) as ClassRow[];
   const sections = (secRes.data ?? []) as SectionRow[];
-  const routines = (rotRes.data ?? []) as RoutineRow[];
+  const routines = allRoutines;
   const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
   const season = ((seasonRes.data?.value as Season) ?? "summer") as Season;
 
