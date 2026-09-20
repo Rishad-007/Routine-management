@@ -49,8 +49,6 @@ import type { Season } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { RoutineCoverageChart } from "@/components/admin/dashboard/routine-coverage-chart";
 import { TeacherWorkloadChart } from "@/components/admin/dashboard/teacher-workload-chart";
-import { ClassCoverageHeatmap } from "@/components/admin/dashboard/class-heatmap";
-import { RoomUtilizationCard } from "@/components/admin/dashboard/room-utilization";
 
 export const dynamic = "force-dynamic";
 
@@ -167,22 +165,6 @@ export default async function AdminDashboardPage() {
   const coverage =
     totalCells > 0 ? Math.round((filledPrimary / totalCells) * 100) : 0;
 
-  const heatmap = classes.map((c) => {
-    const secIds = new Set(
-      sections.filter((s) => s.class_id === c.id).map((s) => s.id)
-    );
-    const days = DAY_ORDER.map((d) => {
-      const total = secIds.size * 7;
-      const filled = new Set(
-        routines
-          .filter((r) => !r.is_tag && r.day === d && secIds.has(r.section_id))
-          .map((r) => `${r.section_id}:${r.period_number}`)
-      ).size;
-      return total > 0 ? Math.round((filled / total) * 100) : 0;
-    });
-    return { className: c.name, sections: secIds.size, days };
-  });
-
   const workloadData = teachers
     .map((t) => {
       const periods = weeklyLoad(routines, t.id).total;
@@ -206,10 +188,6 @@ export default async function AdminDashboardPage() {
       .map((r) => r.room_id as string)
   );
   const usedRooms = todayRoomIds.size;
-  const usedRoomNames = rooms
-    .filter((r) => todayRoomIds.has(r.id))
-    .map((r) => r.name)
-    .sort();
 
   const adjustmentRows = todayAdjustments
     .map((a) => {
@@ -471,100 +449,64 @@ export default async function AdminDashboardPage() {
       <Card className="bg-white/70">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base text-[#1e3a5f]">
-            <CalendarClock className="h-4 w-4 text-[#0d9488]" />
-            Daily Coverage by Class
+            <ClipboardList className="h-4 w-4 text-amber-600" />
+            Today&apos;s Adjustments
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <ClassCoverageHeatmap data={heatmap} />
+          {dayIndex === null ? (
+            <p className="py-6 text-center text-sm text-slate-400">
+              No school today — the routine rests.
+            </p>
+          ) : adjustmentRows.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-6 text-center">
+              <BellRing className="h-6 w-6 text-slate-300" />
+              <p className="text-sm text-slate-400">
+                No adjustments today. The routine is running as scheduled.
+              </p>
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {adjustmentRows.map((r) => (
+                <li
+                  key={r.key}
+                  className="rounded-lg border border-slate-100 bg-white p-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className="border-slate-200 bg-slate-50 text-[#1e3a5f]"
+                    >
+                      Period {r.period}
+                    </Badge>
+                    <span className="text-sm font-semibold text-slate-700">
+                      {r.sectionLabel}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    {r.original}
+                    <span className="mx-1 text-slate-300">→</span>
+                    <span className="font-medium text-teal-700">
+                      {r.substitute}
+                    </span>
+                    {r.isTag ? " (tag)" : ""}
+                    {r.reason ? (
+                      <span className="text-slate-400"> · {r.reason}</span>
+                    ) : null}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link
+            href="/admin/adjust"
+            className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-800"
+          >
+            Open adjustment log
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
         </CardContent>
       </Card>
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="bg-white/70 lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base text-[#1e3a5f]">
-              <ClipboardList className="h-4 w-4 text-amber-600" />
-              Today&apos;s Adjustments
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {dayIndex === null ? (
-              <p className="py-6 text-center text-sm text-slate-400">
-                No school today — the routine rests.
-              </p>
-            ) : adjustmentRows.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-6 text-center">
-                <BellRing className="h-6 w-6 text-slate-300" />
-                <p className="text-sm text-slate-400">
-                  No adjustments today. The routine is running as scheduled.
-                </p>
-              </div>
-            ) : (
-              <ul className="space-y-3">
-                {adjustmentRows.map((r) => (
-                  <li
-                    key={r.key}
-                    className="rounded-lg border border-slate-100 bg-white p-3"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Badge
-                        variant="outline"
-                        className="border-slate-200 bg-slate-50 text-[#1e3a5f]"
-                      >
-                        Period {r.period}
-                      </Badge>
-                      <span className="text-sm font-semibold text-slate-700">
-                        {r.sectionLabel}
-                      </span>
-                    </div>
-                    <p className="mt-1.5 text-xs text-slate-500">
-                      {r.original}
-                      <span className="mx-1 text-slate-300">→</span>
-                      <span className="font-medium text-teal-700">
-                        {r.substitute}
-                      </span>
-                      {r.isTag ? " (tag)" : ""}
-                      {r.reason ? (
-                        <span className="text-slate-400"> · {r.reason}</span>
-                      ) : null}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <Link
-              href="/admin/adjust"
-              className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-800"
-            >
-              Open adjustment log
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-white/70">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base text-[#1e3a5f]">
-              <DoorOpen className="h-4 w-4 text-rose-600" />
-              Room Utilization
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {dayIndex === null ? (
-              <p className="py-6 text-center text-sm text-slate-400">
-                No rooms in use today.
-              </p>
-            ) : (
-              <RoomUtilizationCard
-                used={usedRooms}
-                total={rooms.length}
-                usedNames={usedRoomNames}
-              />
-            )}
-          </CardContent>
-        </Card>
-      </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
         {[
