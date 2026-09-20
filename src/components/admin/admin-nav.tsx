@@ -10,6 +10,8 @@ import {
   SlidersHorizontal,
   UserCheck,
   UserPlus,
+  UserX,
+  BarChart3,
   Globe,
   LogOut,
 } from "lucide-react";
@@ -23,6 +25,8 @@ const NAV_ITEMS = [
   { href: "/admin/assign", label: "Assign Classes", icon: UserPlus },
   { href: "/admin/free-teachers", label: "Free Teachers", icon: UserCheck },
   { href: "/admin/adjust", label: "Adjust Routine", icon: SlidersHorizontal },
+  { href: "/admin/unavailable-teachers", label: "Absence Report", icon: UserX },
+  { href: "/admin/adjustment-stats", label: "Adjustment Stats", icon: BarChart3 },
 ];
 
 const VIEW_ITEMS = [

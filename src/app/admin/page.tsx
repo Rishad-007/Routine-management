@@ -3,10 +3,12 @@ import {
   ArrowRight,
   BellRing,
   CalendarClock,
+  CalendarX2,
   ClipboardList,
   Database,
   DoorOpen,
   Eye,
+  Gauge,
   GraduationCap,
   Moon,
   PieChart as PieChartIcon,
@@ -26,6 +28,7 @@ import {
 import { requireAdmin } from "@/lib/auth";
 import {
   getAdjustments,
+  getAllAdjustments,
   getClasses,
   getRoutines,
   getRooms,
@@ -35,6 +38,7 @@ import {
   getTeachers,
 } from "@/lib/data";
 import { weeklyLoad } from "@/lib/conflicts";
+import { getReportRange } from "@/lib/report-range";
 import {
   getCurrentPeriod,
   getSchoolDayIndex,
@@ -113,6 +117,7 @@ export default async function AdminDashboardPage() {
     rooms,
     routines,
     adjustments,
+    allAdjustments,
     season,
   ] = await Promise.all([
     getClasses(),
@@ -122,6 +127,7 @@ export default async function AdminDashboardPage() {
     getRooms(),
     getRoutines(),
     getAdjustments(),
+    getAllAdjustments(),
     getSetting("season"),
   ]);
 
@@ -130,6 +136,23 @@ export default async function AdminDashboardPage() {
   const now = new Date();
   const dayIndex = getSchoolDayIndex(now);
   const todayAdjustments = adjustments.filter((a) => a.adjust_date === todayStr);
+
+  const weekRange = getReportRange("week", todayStr);
+  const weekAdjustments = allAdjustments.filter(
+    (a) => a.adjust_date >= weekRange.start && a.adjust_date <= weekRange.end,
+  );
+  const weekAbsentTeachers = new Set(
+    weekAdjustments
+      .map((a) => a.original_teacher_id)
+      .filter((id): id is string => Boolean(id)),
+  ).size;
+  const weekSkipped = weekAdjustments.filter((a) => a.original_teacher_id).length;
+  const weekSubs = weekAdjustments.filter((a) => a.new_teacher_id).length;
+  const weekSubTeachers = new Set(
+    weekAdjustments
+      .map((a) => a.new_teacher_id)
+      .filter((id): id is string => Boolean(id)),
+  ).size;
 
   const teacherName = new Map(teachers.map((t) => [t.id, t.full_name]));
   const sectionMap = new Map(sections.map((s) => [s.id, s]));
@@ -323,6 +346,60 @@ export default async function AdminDashboardPage() {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Link href="/admin/unavailable-teachers" className="group">
+          <Card className="h-full bg-white/70 transition-all hover:border-[#1e3a5f]/40 hover:shadow-md">
+            <CardContent className="flex items-start justify-between p-4">
+              <div>
+                <div className="mb-2.5 flex h-9 w-9 items-center justify-center rounded-lg bg-[#1e3a5f]/10">
+                  <CalendarX2 className="h-4.5 w-4.5 text-[#1e3a5f]" />
+                </div>
+                <p className="text-2xl font-bold text-[#1e3a5f]">
+                  {weekAbsentTeachers}
+                </p>
+                <p className="text-xs font-semibold text-slate-600">
+                  Teachers absent this week
+                </p>
+                <p className="text-xs text-slate-400">
+                  {weekSkipped} classes skipped
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-1.5">
+                <ArrowRight className="h-4 w-4 text-slate-300 transition-transform group-hover:translate-x-0.5" />
+                <span className="rounded bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                  Absence Report
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/admin/adjustment-stats" className="group">
+          <Card className="h-full bg-white/70 transition-all hover:border-[#0d9488]/40 hover:shadow-md">
+            <CardContent className="flex items-start justify-between p-4">
+              <div>
+                <div className="mb-2.5 flex h-9 w-9 items-center justify-center rounded-lg bg-[#0d9488]/10">
+                  <Gauge className="h-4.5 w-4.5 text-teal-700" />
+                </div>
+                <p className="text-2xl font-bold text-[#1e3a5f]">{weekSubs}</p>
+                <p className="text-xs font-semibold text-slate-600">
+                  Substitutions this week
+                </p>
+                <p className="text-xs text-slate-400">
+                  {weekSubTeachers} teachers covering
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-1.5">
+                <ArrowRight className="h-4 w-4 text-slate-300 transition-transform group-hover:translate-x-0.5" />
+                <span className="rounded bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                  Adjustment Stats
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-5">
