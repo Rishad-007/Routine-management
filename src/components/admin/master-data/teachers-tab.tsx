@@ -60,7 +60,6 @@ interface Props {
 interface FormState {
   teacherCode: string;
   fullName: string;
-  shortName: string;
   isOpenTeacher: boolean;
   primarySubjectId: string;
   subjectIds: string[];
@@ -71,7 +70,6 @@ interface FormState {
 const emptyForm: FormState = {
   teacherCode: "",
   fullName: "",
-  shortName: "",
   isOpenTeacher: false,
   primarySubjectId: "",
   subjectIds: [],
@@ -105,7 +103,6 @@ export function TeachersTab({ teachers, subjects, teacherSubjects, sections, cla
   const filtered = teachers.filter(
     (t) =>
       t.full_name.toLowerCase().includes(query.toLowerCase()) ||
-      t.short_name.toLowerCase().includes(query.toLowerCase()) ||
       t.teacher_code.toLowerCase().includes(query.toLowerCase())
   );
 
@@ -129,7 +126,6 @@ export function TeachersTab({ teachers, subjects, teacherSubjects, sections, cla
     setForm({
       teacherCode: t.teacher_code,
       fullName: t.full_name,
-      shortName: t.short_name,
       isOpenTeacher: t.is_open_teacher,
       primarySubjectId: t.primary_subject_id ?? "",
       subjectIds: subjectsByTeacher.get(t.id) ?? [],
@@ -144,7 +140,6 @@ export function TeachersTab({ teachers, subjects, teacherSubjects, sections, cla
       const payload = {
         teacherCode: form.teacherCode,
         fullName: form.fullName,
-        shortName: form.shortName,
         isOpenTeacher: form.isOpenTeacher,
         primarySubjectId: form.primarySubjectId || null,
         subjectIds: form.subjectIds,
@@ -186,7 +181,7 @@ export function TeachersTab({ teachers, subjects, teacherSubjects, sections, cla
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
-            placeholder="Search by name, short name or ID…"
+            placeholder="Search by name or ID…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="pl-9"
@@ -212,7 +207,7 @@ export function TeachersTab({ teachers, subjects, teacherSubjects, sections, cla
                   )}
                 </div>
                 <p className="text-xs text-slate-500">
-                  {t.teacher_code} · {t.short_name}
+                  {t.teacher_code} · {t.full_name}
                   {(subjectsByTeacher.get(t.id) ?? []).length > 0 &&
                     ` · ${(subjectsByTeacher.get(t.id) ?? []).map((id) => subjectMap[id]?.short_name).filter(Boolean).join(", ")}`}
                 </p>
@@ -252,14 +247,6 @@ export function TeachersTab({ teachers, subjects, teacherSubjects, sections, cla
                   placeholder="T001"
                   value={form.teacherCode}
                   onChange={(e) => setForm({ ...form, teacherCode: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Short name *</Label>
-                <Input
-                  placeholder="e.g. MRS"
-                  value={form.shortName}
-                  onChange={(e) => setForm({ ...form, shortName: e.target.value })}
                 />
               </div>
             </div>

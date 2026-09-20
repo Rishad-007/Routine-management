@@ -62,7 +62,7 @@ export function buildSectionMatrix(
 ): RoutineMatrix {
   const matrix: RoutineMatrix = {};
   const teacherName = (id: string | null) =>
-    id ? lookups.teachers.find((t) => t.id === id)?.short_name : undefined;
+    id ? lookups.teachers.find((t) => t.id === id)?.full_name : undefined;
   const subjectName = (id: string | null) =>
     id ? lookups.subjects.find((s) => s.id === id)?.name : undefined;
   const subjectShort = (id: string | null) =>
@@ -155,6 +155,8 @@ export function buildTeacherMatrix(
   teacherId: string,
   sections: SectionRow[],
   classes: ClassRow[],
+  subjects: SubjectRow[],
+  rooms: RoomRow[],
   todayOverrides?: Map<string, AdjustOverride>,
   tagOverrides?: Map<string, AdjustOverride>,
 ): RoutineMatrix {
@@ -165,6 +167,12 @@ export function buildTeacherMatrix(
     const c = classes.find((x) => x.id === s.class_id);
     return c ? `${c.name}-${s.name}` : s.name;
   };
+  const subjectName = (id: string | null) =>
+    id ? subjects.find((s) => s.id === id)?.name : undefined;
+  const subjectShort = (id: string | null) =>
+    id ? subjects.find((s) => s.id === id)?.short_name : undefined;
+  const roomName = (id: string | null) =>
+    id ? rooms.find((r) => r.id === id)?.name : undefined;
 
   for (const r of routines) {
     const override = r.is_tag
@@ -178,16 +186,22 @@ export function buildTeacherMatrix(
     const classLabel = sectionLabel(r.section_id);
 
     // Apply adjustments if today
+    const effectiveSubjectId = override?.newSubjectId ?? r.subject_id;
+    const effectiveRoomId = override?.newRoomId ?? r.room_id;
+
     let effectiveClass = classLabel;
-    if (!r.is_tag) {
-      if (override) effectiveClass = classLabel + " (adj)";
-    }
     if (r.is_tag) {
       if (override) effectiveClass = classLabel + " (tag adj)";
+    } else if (override) {
+      effectiveClass = classLabel + " (adj)";
     }
 
     matrix[r.day][r.period_number] = {
-      subject: effectiveClass,
+      subject: subjectName(effectiveSubjectId),
+      subjectShort: subjectShort(effectiveSubjectId),
+      room: roomName(effectiveRoomId),
+      classLabel: effectiveClass,
+      isAdjusted: !!override,
     };
   }
   return matrix;

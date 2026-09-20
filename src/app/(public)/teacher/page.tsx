@@ -3,6 +3,8 @@ import {
   getRoutines,
   getSections,
   getClasses,
+  getSubjects,
+  getRooms,
   getSetting,
   getAdjustments,
 } from "@/lib/data";
@@ -20,11 +22,22 @@ export default async function TeacherPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const params = await searchParams;
-  const [teachers, routines, sections, classes, season, adjustments] = await Promise.all([
+  const [
+    teachers,
+    routines,
+    sections,
+    classes,
+    subjects,
+    rooms,
+    season,
+    adjustments,
+  ] = await Promise.all([
     getTeachers(),
     getRoutines(),
     getSections(),
     getClasses(),
+    getSubjects(),
+    getRooms(),
     getSetting("season"),
     getAdjustments(),
   ]);
@@ -41,6 +54,8 @@ export default async function TeacherPage({
       t.id,
       sections,
       classes,
+      subjects,
+      rooms,
       todayPrimaryOverrides,
       todayTagOverrides
     );

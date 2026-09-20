@@ -172,7 +172,7 @@ export function RoutineBuilder({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const teacherNames = useMemo(
-    () => new Map(teachers.map((t) => [t.id, t.short_name])),
+    () => new Map(teachers.map((t) => [t.id, t.full_name])),
     [teachers]
   );
   const subjectNames = useMemo(
@@ -336,7 +336,7 @@ export function RoutineBuilder({
       })
       .sort(
         (a, b) =>
-          Number(a.busy) - Number(b.busy) || a.short_name.localeCompare(b.short_name)
+          Number(a.busy) - Number(b.busy) || a.full_name.localeCompare(b.full_name)
       );
   }, [
     selected,
@@ -355,7 +355,6 @@ export function RoutineBuilder({
     const q = sheetSearch.toLowerCase();
     return teacherPickerList.filter(
       (t) =>
-        t.short_name.toLowerCase().includes(q) ||
         t.teacher_code.toLowerCase().includes(q) ||
         t.full_name.toLowerCase().includes(q)
     );
@@ -952,7 +951,7 @@ export function RoutineBuilder({
                 >
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-1.5 font-medium text-slate-800">
-                      {t.short_name}
+                      {t.full_name}
                       {t.busy ? (
                         <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
                           busy

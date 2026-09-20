@@ -101,6 +101,12 @@ export function RoutineGrid({
                             ? cell.subjectShort || cell.subject || "—"
                             : cell.subject || "—"}
                         </p>
+                        {variant === "compact" && cell.classLabel && (
+                          <p className="text-xs text-slate-500">
+                            {cell.classLabel}
+                            {cell.room ? ` · ${cell.room}` : ""}
+                          </p>
+                        )}
                         {variant !== "compact" && (
                           <p className="text-xs text-slate-500">
                             {cell.teacher || "—"}
@@ -126,6 +132,11 @@ export function RoutineGrid({
                               <p className="text-xs text-teal-600">
                                 {cell.teacher2 || "—"}
                                 {cell.room2 ? ` · ${cell.room2}` : ""}
+                              </p>
+                            )}
+                            {variant === "compact" && cell.room2 && (
+                              <p className="text-xs text-teal-600">
+                                {cell.room2}
                               </p>
                             )}
                             <div className="flex justify-center gap-1">

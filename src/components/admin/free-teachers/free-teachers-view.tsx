@@ -11,7 +11,6 @@ import { DAY_LABELS } from "@/lib/types";
 
 export interface TeacherAvailability {
   id: string;
-  shortName: string;
   fullName: string;
   code: string;
   isOpen: boolean;
@@ -59,7 +58,6 @@ export function FreeTeachersView({
     const q = query.trim().toLowerCase();
     if (!q) return { free: selected.free, busy: selected.busy };
     const match = (t: TeacherAvailability) =>
-      t.shortName.toLowerCase().includes(q) ||
       t.fullName.toLowerCase().includes(q) ||
       t.code.toLowerCase().includes(q);
     return { free: selected.free.filter(match), busy: selected.busy.filter(match) };
@@ -204,7 +202,7 @@ function Section({
             >
               <div className="min-w-0">
                 <p className="flex items-center gap-1.5 truncate font-medium text-[#1e3a5f]">
-                  {t.shortName}
+                  {t.fullName}
                   {t.isOpen && (
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                       Open

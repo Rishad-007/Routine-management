@@ -460,7 +460,6 @@ export function AdjustBuilder({
     const q = teacherSearch.toLowerCase();
     return teachers.filter(
       (t) =>
-        t.short_name.toLowerCase().includes(q) ||
         t.teacher_code.toLowerCase().includes(q) ||
         t.id.toLowerCase().includes(q),
     );
@@ -505,7 +504,7 @@ export function AdjustBuilder({
           Number(b.is_open_teacher) - Number(a.is_open_teacher) ||
           a.dayCount - b.dayCount ||
           a.weekTotal - b.weekTotal ||
-          a.short_name.localeCompare(b.short_name),
+          a.full_name.localeCompare(b.full_name),
       );
   }, [teachers, effectiveIndex, dayIndex, sheetPeriod]);
 
@@ -514,7 +513,7 @@ export function AdjustBuilder({
     const q = sheetSearch.toLowerCase();
     return freeTeachersForSheet.filter(
       (t) =>
-        t.short_name.toLowerCase().includes(q) ||
+        t.full_name.toLowerCase().includes(q) ||
         t.teacher_code.toLowerCase().includes(q),
     );
   }, [freeTeachersForSheet, sheetSearch]);
@@ -942,10 +941,10 @@ export function AdjustBuilder({
                                   : (section?.name ?? "—")}
                               </td>
                               <td className="px-4 py-2 text-slate-600">
-                                {originalTeacher?.short_name ?? "—"}
+                                {originalTeacher?.full_name ?? "—"}
                               </td>
                               <td className="px-4 py-2 font-medium text-[#0d9488]">
-                                {newTeacher?.short_name ?? "—"}
+                                {newTeacher?.full_name ?? "—"}
                               </td>
                             </tr>
                           );
@@ -1000,7 +999,7 @@ export function AdjustBuilder({
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-slate-800">
-                        {t.short_name}
+                        {t.full_name}
                       </span>
                       <span
                         className={cn(
@@ -1046,7 +1045,7 @@ export function AdjustBuilder({
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-[#1e3a5f]">
-                      {selectedTeacher.short_name}
+                      {selectedTeacher.full_name}
                     </h3>
                     <p className="text-sm text-slate-500">
                       {selectedTeacher.teacher_code} —{" "}
@@ -1143,11 +1142,11 @@ export function AdjustBuilder({
                           );
                         const effectiveName = override
                           ? teachers.find((t) => t.id === override.newTeacherId)
-                              ?.short_name
+                              ?.full_name
                           : cell.effectiveTeacherId
                             ? teachers.find(
                                 (t) => t.id === cell.effectiveTeacherId,
-                              )?.short_name
+                              )?.full_name
                             : null;
 
                         const tagOv = tagOverrides[cell.period];
@@ -1194,7 +1193,7 @@ export function AdjustBuilder({
                                 </span>
                                 <span className="ml-1 text-sm text-slate-500">
                                   ·{" "}
-                                  {effectiveName ?? selectedTeacher.short_name}
+                                  {effectiveName ?? selectedTeacher.full_name}
                                 </span>
                                 {(hasOverride || cell.isAdjusted) && (
                                   <Badge
@@ -1216,7 +1215,7 @@ export function AdjustBuilder({
                                     {teachers.find(
                                       (t) =>
                                         t.id === cell.tagEffectiveTeacherId,
-                                    )?.short_name || "—"}
+                                    )?.full_name || "—"}
                                   </span>
                                   {cell.isTagAdjusted && (
                                     <Badge
@@ -1251,7 +1250,7 @@ export function AdjustBuilder({
                                 </div>
                               ) : (
                                 <span className="text-base text-slate-500">
-                                  {selectedTeacher.short_name}
+                                  {selectedTeacher.full_name}
                                 </span>
                               )}
                             </td>
@@ -1305,7 +1304,7 @@ export function AdjustBuilder({
             <>
               <DialogHeader>
                 <DialogTitle className="text-[#1e3a5f]">
-                  {routineTeacher.short_name}&apos;s routine
+                  {routineTeacher.full_name}&apos;s routine
                 </DialogTitle>
                 <DialogDescription>
                   {routineTeacher.teacher_code} · Weekly base routine.
@@ -1599,7 +1598,7 @@ export function AdjustBuilder({
                       >
                         <div className="flex items-center justify-between">
                           <span className="flex items-center gap-1.5 font-medium text-slate-800">
-                            {t.short_name}
+                            {t.full_name}
                             {t.busy ? (
                               <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
                                 busy
@@ -1650,8 +1649,8 @@ export function AdjustBuilder({
                         type="button"
                         size="icon"
                         variant="outline"
-                        title={`View ${t.short_name}'s routine`}
-                        aria-label={`View ${t.short_name}'s routine`}
+                        title={`View ${t.full_name}'s routine`}
+                        aria-label={`View ${t.full_name}'s routine`}
                         onClick={() => setRoutineTeacherId(t.id)}
                         className="shrink-0"
                       >

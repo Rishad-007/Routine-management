@@ -93,7 +93,6 @@ export default async function FreeTeachersPage({
       const isBusy = isBusyIndexed(dayIndex, t.id, day, period);
       const entry = {
         id: t.id,
-        shortName: t.short_name,
         fullName: t.full_name,
         code: t.teacher_code,
         isOpen: t.is_open_teacher,
@@ -118,7 +117,7 @@ export default async function FreeTeachersPage({
       Number(b.isOpen) - Number(a.isOpen) ||
       a.dayCount - b.dayCount ||
       a.weekTotal - b.weekTotal ||
-      a.shortName.localeCompare(b.shortName);
+      a.fullName.localeCompare(b.fullName);
 
     return {
       period,

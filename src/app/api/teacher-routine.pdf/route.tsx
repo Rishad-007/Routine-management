@@ -10,6 +10,8 @@ import type {
   SectionRow,
   ClassRow,
   TeacherRow,
+  SubjectRow,
+  RoomRow,
   RoutineRow,
   AdjustmentRow,
 } from "@/lib/types";
@@ -81,6 +83,8 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   sub: { fontSize: 8, color: "#1e3a5f" },
+  cls: { fontSize: 7, color: "#475569" },
+  roomLbl: { fontSize: 7, color: "#94a3b8" },
   adj: { fontSize: 6, color: "#d97706" },
   empty: { fontSize: 8, color: "#cbd5e1" },
   footer: { marginTop: 12, textAlign: "center", fontSize: 7, color: "#94a3b8" },
@@ -98,11 +102,13 @@ export async function GET(req: NextRequest) {
   const today = getTodayLocal();
 
   // `routines` is 3000+ rows — paged, or the PDF silently omits most periods.
-  const [teaRes, clsRes, secRes, allRoutines, adjRes, seasonRes] =
+  const [teaRes, clsRes, secRes, subRes, roomRes, allRoutines, adjRes, seasonRes] =
     await Promise.all([
       admin.from("teachers").select("*").eq("id", teacherId).single(),
       admin.from("classes").select("*"),
       admin.from("sections").select("*"),
+      admin.from("subjects").select("*"),
+      admin.from("rooms").select("*"),
       fetchAllRows<RoutineRow>(
         () =>
           admin
@@ -120,6 +126,8 @@ export async function GET(req: NextRequest) {
 
   const classes = (clsRes.data ?? []) as ClassRow[];
   const sections = (secRes.data ?? []) as SectionRow[];
+  const subjects = (subRes.data ?? []) as SubjectRow[];
+  const rooms = (roomRes.data ?? []) as RoomRow[];
   const routines = allRoutines;
   const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
   const season = ((seasonRes.data?.value as Season) ?? "summer") as Season;
@@ -131,6 +139,8 @@ export async function GET(req: NextRequest) {
     teacherId,
     sections,
     classes,
+    subjects,
+    rooms,
     todayPrimaryOverrides,
     todayTagOverrides
   );
@@ -163,14 +173,18 @@ export async function GET(req: NextRequest) {
               </View>
               {[1, 2, 3, 4, 5, 6, 7].map((p) => {
                 const cell = matrix[day]?.[p];
-                const label = cell?.subject ?? "";
-                const adjusted = label.includes("adj");
-                const clean = label.replace(" (adj)", "").replace(" (tag adj)", "");
+                const subject = cell?.subjectShort || cell?.subject || "";
+                const classLabel = cell?.classLabel ?? "";
+                const adjusted = classLabel.includes("adj");
+                const clean = classLabel.replace(" (adj)", "").replace(" (tag adj)", "");
+                const hasCell = Boolean(subject || classLabel);
                 return (
                   <View style={styles.cell} key={p}>
-                    {label ? (
+                    {hasCell ? (
                       <>
-                        <Text style={styles.sub}>{clean}</Text>
+                        {subject && <Text style={styles.sub}>{subject}</Text>}
+                        {clean && <Text style={styles.cls}>{clean}</Text>}
+                        {cell?.room && <Text style={styles.roomLbl}>{cell.room}</Text>}
                         {adjusted && <Text style={styles.adj}>Adj</Text>}
                       </>
                     ) : (

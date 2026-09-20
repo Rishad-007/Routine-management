@@ -40,7 +40,6 @@ export function TeacherRoutineViewer({
       teachers.filter(
         (t) =>
           t.full_name.toLowerCase().includes(query.toLowerCase()) ||
-          t.short_name.toLowerCase().includes(query.toLowerCase()) ||
           t.teacher_code.toLowerCase().includes(query.toLowerCase())
       ),
     [teachers, query]
@@ -80,7 +79,7 @@ export function TeacherRoutineViewer({
           <div>
             <h1 className="text-2xl font-bold text-[#1e3a5f]">Teacher Routine</h1>
             <p className="text-sm text-slate-500">
-              Search by teacher ID, short name or full name.
+              Search by teacher ID or full name.
             </p>
           </div>
           <Button
@@ -106,7 +105,7 @@ export function TeacherRoutineViewer({
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 className="pl-9"
-                placeholder="Search… eg. T001 or MRS"
+                placeholder="Search… eg. T001 or teacher name"
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
@@ -133,7 +132,7 @@ export function TeacherRoutineViewer({
                         {initials(t.full_name)}
                       </span>
                       <span className={isSel ? "font-medium text-white" : "font-medium text-[#1e3a5f]"}>
-                        {t.short_name}
+                        {t.full_name}
                       </span>
                       <span className={isSel ? "text-xs text-teal-100" : "text-xs text-slate-400"}>
                         ({t.teacher_code})

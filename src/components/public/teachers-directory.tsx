@@ -44,7 +44,6 @@ export function TeachersDirectory({
   const filtered = teachers.filter(
     (t) =>
       t.full_name.toLowerCase().includes(query.toLowerCase()) ||
-      t.short_name.toLowerCase().includes(query.toLowerCase()) ||
       t.teacher_code.toLowerCase().includes(query.toLowerCase())
   );
 
@@ -62,7 +61,7 @@ export function TeachersDirectory({
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <Input
           className="pl-9"
-          placeholder="Search by name, short name or ID…"
+          placeholder="Search by name or ID…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />

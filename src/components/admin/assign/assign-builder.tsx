@@ -139,7 +139,6 @@ export function AssignBuilder({
     return teachers.filter(
       (t) =>
         t.full_name.toLowerCase().includes(q) ||
-        t.short_name.toLowerCase().includes(q) ||
         t.teacher_code.toLowerCase().includes(q),
     );
   }, [teachers, search]);
@@ -310,7 +309,7 @@ export function AssignBuilder({
                     : "hover:bg-slate-100",
                 )}
               >
-                <p className="font-medium">{t.short_name}</p>
+                <p className="font-medium">{t.full_name}</p>
                 <p
                   className={cn(
                     "truncate text-xs",
@@ -590,7 +589,7 @@ export function AssignBuilder({
             <AlertDialogTitle>That period already has a teacher</AlertDialogTitle>
             <AlertDialogDescription>
               {roleChoice?.occupiedBy} already teaches this period. You can add{" "}
-              {teacher?.short_name ?? "this teacher"} as a second, parallel class
+              {teacher?.full_name ?? "this teacher"} as a second, parallel class
               (like a religion group, with its own room), or replace{" "}
               {roleChoice?.occupiedBy}.
             </AlertDialogDescription>
@@ -620,7 +619,7 @@ export function AssignBuilder({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove this class?</AlertDialogTitle>
             <AlertDialogDescription>
-              {teacher?.short_name} will no longer teach {removing?.label} in{" "}
+              {teacher?.full_name} will no longer teach {removing?.label} in{" "}
               {removing ? DAY_LABELS[removing.day] : ""} period{" "}
               {removing?.period}. The period stays in the routine if another
               teacher still holds it.

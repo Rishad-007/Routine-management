@@ -73,9 +73,9 @@ export async function saveSectionRoutine(
   const teacherNames = new Map<string, string>();
   const { data: teachers, error: tErr } = await admin
     .from("teachers")
-    .select("id, short_name");
+    .select("id, full_name");
   if (tErr) return { error: tErr.message };
-  for (const t of teachers ?? []) teacherNames.set(t.id, t.short_name);
+  for (const t of teachers ?? []) teacherNames.set(t.id, t.full_name);
 
   // Existing routines for all sections (for conflict checks). Must be paged —
   // an unbounded select returns only the first 1000 of 3000+ rows, which would

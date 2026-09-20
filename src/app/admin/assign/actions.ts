@@ -109,11 +109,11 @@ export async function assignTeacherPeriod(
               { count: "exact" },
             ) as unknown as PagedQuery<RoutineRow>,
       ),
-      admin.from("teachers").select("id, short_name"),
+      admin.from("teachers").select("id, full_name"),
     ]);
     routines = rows;
     teacherNames = new Map(
-      (teachers.data ?? []).map((t) => [t.id, t.short_name as string]),
+      (teachers.data ?? []).map((t) => [t.id, t.full_name as string]),
     );
   } catch (e) {
     return {

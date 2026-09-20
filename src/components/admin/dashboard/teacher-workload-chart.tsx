@@ -11,6 +11,7 @@ import {
 } from "recharts";
 
 interface TeacherLoadDatum {
+  id: string;
   name: string;
   periods: number;
   level: "light" | "normal" | "heavy";
@@ -60,7 +61,7 @@ export function TeacherWorkloadChart({ data }: Props) {
         />
         <Bar dataKey="periods" radius={[3, 3, 0, 0]} maxBarSize={26}>
           {data.map((d) => (
-            <Cell key={d.name} fill={BAR_COLORS[d.level]} />
+            <Cell key={d.id} fill={BAR_COLORS[d.level]} />
           ))}
         </Bar>
       </BarChart>

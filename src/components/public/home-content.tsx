@@ -105,7 +105,7 @@ export function HomeContent({
     const s = subjects.find((x) => x.id === subjectId);
     return {
       subject: s?.name,
-      teacher: t?.short_name,
+      teacher: t?.full_name,
       room: r.room_id ? "Room" : undefined,
       isAdjusted: !!adj,
     };
@@ -365,7 +365,7 @@ export function HomeContent({
                     </Avatar>
                     <div>
                       <p className="line-clamp-1 text-sm font-semibold text-[#1e3a5f]">
-                        {t.short_name}
+                        {t.full_name}
                       </p>
                       <p className="text-xs text-slate-500">{t.teacher_code}</p>
                     </div>

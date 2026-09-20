@@ -170,7 +170,7 @@ async function getSectionRoutine(sectionId: string) {
     }
 
     let subject2 = tag ? (tag.subject_id ? subjects.get(tag.subject_id)?.name : undefined) : undefined;
-    let teacher2 = tag ? (tag.teacher_id ? teachers.get(tag.teacher_id)?.short_name : undefined) : undefined;
+    let teacher2 = tag ? (tag.teacher_id ? teachers.get(tag.teacher_id)?.full_name : undefined) : undefined;
     let room2 = tag ? (tag.room_id ? rooms.get(tag.room_id)?.name : undefined) : undefined;
     const isTag = !!tag;
 
@@ -183,7 +183,7 @@ async function getSectionRoutine(sectionId: string) {
           a.is_tag
       );
       if (tagAdj) {
-        if (tagAdj.new_teacher_id) teacher2 = teachers.get(tagAdj.new_teacher_id)?.short_name;
+        if (tagAdj.new_teacher_id) teacher2 = teachers.get(tagAdj.new_teacher_id)?.full_name;
         if (tagAdj.new_subject_id) subject2 = subjects.get(tagAdj.new_subject_id)?.name;
         if (tagAdj.new_room_id) room2 = rooms.get(tagAdj.new_room_id)?.name;
       }
@@ -192,7 +192,7 @@ async function getSectionRoutine(sectionId: string) {
     if (!matrix[day]) matrix[day] = {};
     matrix[day][period] = {
       subject: subjectId ? subjects.get(subjectId)?.name : undefined,
-      teacher: teacherId ? teachers.get(teacherId)?.short_name : undefined,
+      teacher: teacherId ? teachers.get(teacherId)?.full_name : undefined,
       room: roomId ? rooms.get(roomId)?.name : undefined,
       subject2,
       teacher2,

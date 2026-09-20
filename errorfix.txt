@@ -1,0 +1,70 @@
+# Error Fix Plan — duplicate React keys in TeacherWorkloadChart
+
+## Diagnosis
+
+All reported console errors share ONE root cause:
+Production teacher data has duplicate `short_name` values (initials like `MH`,
+`SA`, `MR`, `AR`...). The admin dashboard keys the workload chart cells on
+`short_name`, so every collision emits a "two children with the same key"
+warning — collectively the 27 errors.
+
+- `src/app/admin/page.tsx:166` -> `{ name: t.short_name, ... }`
+- `src/components/admin/dashboard/teacher-workload-chart.tsx:63` -> `<Cell key={d.name} .../>`
+
+Fix = stop using teacher `short_name` as identity/label on the frontend; key on
+teacher `id`, display `full_name`.
+
+Decisions (confirmed):
+- Teachers only — subject `short_name` codes (Bng, Eng) stay untouched.
+- Keep DB column `teachers.short_name` (NOT NULL); server actions auto-derive
+  initials from `full_name`. No schema/seed/import-SQL changes.
+
+## Plan
+
+### 1. Fix the chart (the reported error)
+- `src/app/admin/page.tsx:163-168` — workload datum becomes
+  `{ id: t.id, name: t.full_name, periods, level }`.
+- `src/components/admin/dashboard/teacher-workload-chart.tsx` — add `id` to the
+  datum interface, `<Cell key={d.id}>`; axis keeps `name` (now full name).
+
+### 2. Swap teacher `short_name` -> `full_name` on the frontend (teachers only)
+- Public:
+  - `src/components/public/home-content.tsx:108,368` (current-cell teacher, card label)
+  - `src/components/public/teachers-directory.tsx:47` (search)
+  - `src/components/public/teacher-routine-viewer.tsx:43,136` (search + chip label)
+- `src/lib/routine-view.ts:65` `teacherName()` -> `full_name`
+  (fixes public routine grids + PDFs: `api/routine.pdf`, `api/teacher-routine.pdf`)
+- `src/app/api/adjust-report.pdf/route.tsx:184` -> use `full_name`
+- Admin:
+  - `src/app/admin/free-teachers/page.tsx:96,121` + `free-teachers-view.tsx:14,62,207`
+  - `src/components/admin/routine/routine-builder.tsx:175,339,358,955`
+  - `src/components/admin/assign/assign-builder.tsx:142,313,593,623`
+  - `src/components/admin/adjust/adjust-builder.tsx:463,508,517,945,948,1003,
+    1049,1146,1150,1197,1219,1254,1308,1602,1653-1654`
+- Actions:
+  - `src/app/admin/routine/actions.ts:73-78` — select/label by `full_name`
+  - `src/app/admin/assign/actions.ts:112-116` — select/label by `full_name`
+
+### 3. Master-data teacher form (remove short-name input)
+- `src/components/admin/master-data/teachers-tab.tsx` — delete `shortName` from
+  `FormState`, `emptyForm`, edit-fill, payload, and the "Short name *" input
+  (lines ~258-264); label row uses `full_name`; search drops short_name.
+- `src/app/admin/master-data/actions.ts` — `createTeacher`/`updateTeacher` drop
+  the `shortName` field; auto-derive `short_name` server-side from `full_name`
+  (initials) so NOT NULL stays satisfied; relax validation message.
+
+### 4. Docs/assets text
+- Update placeholder strings referencing "short name":
+  - `teachers-directory.tsx:~65`
+  - `teacher-routine-viewer.tsx:83,109`
+  - `teachers-tab.tsx:~189`
+
+### 5. Verify
+- `npx tsc --noEmit`
+- `npm run lint`
+- Production build (`npm run build`)
+
+## Out of scope
+- `teachers.short_name` DB column stays.
+- Subject `short_name` untouched.
+- No schema.sql / demo-data.sql / seed.sql / import-routine.sql changes.

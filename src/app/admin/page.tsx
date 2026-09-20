@@ -131,7 +131,7 @@ export default async function AdminDashboardPage() {
   const dayIndex = getSchoolDayIndex(now);
   const todayAdjustments = adjustments.filter((a) => a.adjust_date === todayStr);
 
-  const teacherName = new Map(teachers.map((t) => [t.id, t.short_name]));
+  const teacherName = new Map(teachers.map((t) => [t.id, t.full_name]));
   const sectionMap = new Map(sections.map((s) => [s.id, s]));
   const classMap = new Map(classes.map((c) => [c.id, c]));
 
@@ -163,7 +163,12 @@ export default async function AdminDashboardPage() {
   const workloadData = teachers
     .map((t) => {
       const periods = weeklyLoad(routines, t.id).total;
-      return { name: t.short_name, periods, level: workloadLevel(periods) };
+      return {
+        id: t.id,
+        name: t.full_name,
+        periods,
+        level: workloadLevel(periods),
+      };
     })
     .sort((a, b) => b.periods - a.periods);
   const workloadCounts = {

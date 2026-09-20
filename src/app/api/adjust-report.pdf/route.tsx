@@ -181,7 +181,7 @@ async function fetchReportData(date: string) {
 
       const newTeacherRow = a.new_teacher_id ? tch.get(a.new_teacher_id) : undefined;
       const newTeacher =
-        newTeacherRow?.short_name || newTeacherRow?.full_name || "—";
+        newTeacherRow?.full_name || "—";
 
       return {
         originalTeacherId: a.original_teacher_id,

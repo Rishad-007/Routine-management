@@ -226,10 +226,22 @@ export async function deleteSubject(id: string) {
 
 // ---------------- Teachers ----------------
 
+/** Derive initials from a full name, e.g. "Md. Abdul Karim" -> "MAK". */
+function initialsFromName(fullName: string): string {
+  return (
+    fullName
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase() || fullName.trim()
+  );
+}
+
 export async function createTeacher(input: {
   teacherCode: string;
   fullName: string;
-  shortName: string;
   isOpenTeacher: boolean;
   primarySubjectId: string | null;
   subjectIds: string[];
@@ -237,12 +249,12 @@ export async function createTeacher(input: {
   classTeacherSectionId: string | null;
 }) {
   const { admin } = await authed();
-  if (!input.teacherCode.trim() || !input.fullName.trim() || !input.shortName.trim())
-    return { error: "Teacher code, full name and short name are required." };
+  if (!input.teacherCode.trim() || !input.fullName.trim())
+    return { error: "Teacher code and full name are required." };
   const { error } = await admin.from("teachers").insert({
     teacher_code: input.teacherCode.trim(),
     full_name: input.fullName.trim(),
-    short_name: input.shortName.trim(),
+    short_name: initialsFromName(input.fullName),
     is_open_teacher: input.isOpenTeacher,
     primary_subject_id: input.primarySubjectId,
     designation: input.designation.trim(),
@@ -265,7 +277,6 @@ export async function updateTeacher(
   input: {
     teacherCode: string;
     fullName: string;
-    shortName: string;
     isOpenTeacher: boolean;
     primarySubjectId: string | null;
     subjectIds: string[];
@@ -274,14 +285,14 @@ export async function updateTeacher(
   }
 ) {
   const { admin } = await authed();
-  if (!input.teacherCode.trim() || !input.fullName.trim() || !input.shortName.trim())
-    return { error: "Teacher code, full name and short name are required." };
+  if (!input.teacherCode.trim() || !input.fullName.trim())
+    return { error: "Teacher code and full name are required." };
   const { error } = await admin
     .from("teachers")
     .update({
       teacher_code: input.teacherCode.trim(),
       full_name: input.fullName.trim(),
-      short_name: input.shortName.trim(),
+      short_name: initialsFromName(input.fullName),
       is_open_teacher: input.isOpenTeacher,
       primary_subject_id: input.primarySubjectId,
       designation: input.designation.trim(),
