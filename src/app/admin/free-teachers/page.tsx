@@ -3,8 +3,10 @@ import {
   getAdjustments,
   getClassPeriodRules,
   getClasses,
+  getRooms,
   getRoutines,
   getSections,
+  getSubjects,
   getTeachers,
 } from "@/lib/data";
 import {
@@ -18,6 +20,7 @@ import { isPeriodAllowed } from "@/lib/class-period-rules";
 import { getSchoolDayIndex, getTodayLocal } from "@/lib/periods";
 import { DAY_ORDER, PERIOD_ORDER } from "@/lib/constants";
 import { DAY_LABELS } from "@/lib/types";
+import type { RoutinePreviewSourceRow } from "@/lib/teacher-routine-preview";
 import {
   FreeTeachersView,
   type PeriodAvailability,
@@ -39,7 +42,7 @@ export default async function FreeTeachersPage({
   const day =
     DAY_ORDER.includes(requested) ? requested : (todayIndex ?? DAY_ORDER[0]);
 
-  const [teachers, routines, adjustments, sections, classes, rules] =
+  const [teachers, routines, adjustments, sections, classes, rules, subjects, rooms] =
     await Promise.all([
       getTeachers(),
       getRoutines(),
@@ -47,6 +50,8 @@ export default async function FreeTeachersPage({
       getSections(),
       getClasses(),
       getClassPeriodRules(),
+      getSubjects(),
+      getRooms(),
     ]);
 
   // Substitutions are date-scoped, so they only describe *today*. A weekday
@@ -85,7 +90,35 @@ export default async function FreeTeachersPage({
     ]),
   );
 
-  // Ship only the derived per-period lists, never the 3000+ routine rows.
+  // Lookups for the weekly-routine popup (matching the adjust section's cell
+  // labels). Passed as plain records because Maps are not serializable across
+  // the server→client boundary.
+  const subjectLabels: Record<string, string> = {};
+  for (const s of subjects) subjectLabels[s.id] = s.short_name ?? s.name;
+
+  const roomLabels: Record<string, string> = {};
+  for (const r of rooms) roomLabels[r.id] = r.name;
+
+  const routineSectionLabels: Record<string, string> = {};
+  for (const s of sections) {
+    const cls = classMap.get(s.class_id) ?? "—";
+    routineSectionLabels[s.id] = `${cls}-${s.name}`;
+  }
+
+  // Slim per-period routine rows so the client can render a teacher's weekly
+  // routine popup without shipping the full RoutineRow type.
+  const routineRows: RoutinePreviewSourceRow[] = routines.map((r) => ({
+    teacher_id: r.teacher_id,
+    day: r.day,
+    period_number: r.period_number,
+    section_id: r.section_id,
+    subject_id: r.subject_id,
+    room_id: r.room_id,
+    is_tag: r.is_tag,
+  }));
+
+  // Ship only the derived per-period lists plus the slim routine rows above,
+  // never the 3000+ full routine rows.
   const periods: PeriodAvailability[] = PERIOD_ORDER.map((period) => {
     const free: TeacherAvailability[] = [];
     const busy: TeacherAvailability[] = [];
@@ -146,6 +179,10 @@ export default async function FreeTeachersPage({
         periods={periods}
         totalTeachers={teachers.length}
         adjustedToday={adjustedToday}
+        subjectLabels={subjectLabels}
+        roomLabels={roomLabels}
+        routineSectionLabels={routineSectionLabels}
+        routineRows={routineRows}
       />
     </div>
   );

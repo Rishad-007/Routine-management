@@ -50,6 +50,7 @@ import {
   TIFFIN_AFTER_PERIOD,
 } from "@/lib/constants";
 import { getSchoolDayIndex, getTodayLocal } from "@/lib/periods";
+import { buildTeacherRoutinePreview } from "@/lib/teacher-routine-preview";
 import {
   applyAdjustmentsToRoutines,
   buildRoutineIndex,
@@ -262,104 +263,23 @@ export function AdjustBuilder({
   const routinePreview = useMemo(() => {
     if (!routineTeacherId) return null;
 
-    const cells = new Map<
-      string,
-      {
-        period: number;
-        subject: string;
-        classLabel: string;
-        room: string;
-        isTag: boolean;
-        continuous: number;
-      }
-    >();
-
-    for (const day of DAY_LABEL_LIST.map((_, index) => index)) {
-      const teacherPeriods = new Set(
-        effectiveRoutines
-          .filter(
-            (routine) =>
-              routine.teacher_id === routineTeacherId && routine.day === day,
-          )
-          .map((routine) => routine.period_number),
-      );
-
-      for (const period of PERIOD_ORDER) {
-        const routine = effectiveRoutines.find(
-          (item) =>
-            item.teacher_id === routineTeacherId &&
-            item.day === day &&
-            item.period_number === period,
-        );
-        if (!routine) continue;
-
-        let continuous = 1;
-        for (
-          let previous = period - 1;
-          teacherPeriods.has(previous) && previous !== TIFFIN_AFTER_PERIOD;
-          previous -= 1
-        ) {
-          continuous += 1;
-        }
-        for (
-          let next = period + 1;
-          teacherPeriods.has(next) && next !== TIFFIN_AFTER_PERIOD + 1;
-          next += 1
-        ) {
-          continuous += 1;
-        }
-
-        const section = sections.find((item) => item.id === routine.section_id);
+    return buildTeacherRoutinePreview({
+      routines: effectiveRoutines,
+      teacherId: routineTeacherId,
+      subjectLabel: (id) => {
+        const subject = subjectMap.get(id);
+        return subject?.short_name ?? subject?.name ?? "—";
+      },
+      sectionLabel: (id) => {
+        const section = sections.find((item) => item.id === id);
         const classRow = section
           ? classes.find((item) => item.id === section.class_id)
           : undefined;
-        const subject = routine.subject_id
-          ? subjectMap.get(routine.subject_id)
-          : undefined;
-        const room = routine.room_id
-          ? rooms.find((item) => item.id === routine.room_id)
-          : undefined;
-        cells.set(`${day}:${period}`, {
-          period,
-          subject: subject?.short_name ?? subject?.name ?? "—",
-          classLabel:
-            section && classRow ? `${classRow.name}-${section.name}` : "—",
-          room: room?.name ?? "—",
-          isTag: routine.is_tag,
-          continuous,
-        });
-      }
-    }
-
-    const daily = DAY_LABEL_LIST.map((_, day) => {
-      const periods = PERIOD_ORDER.filter((period) =>
-        cells.has(`${day}:${period}`),
-      );
-      return {
-        count: periods.length,
-        continuous: Math.max(
-          0,
-          ...periods.map(
-            (period) => cells.get(`${day}:${period}`)?.continuous ?? 0,
-          ),
-        ),
-      };
+        return section && classRow ? `${classRow.name}-${section.name}` : "—";
+      },
+      roomLabel: (id) => rooms.find((item) => item.id === id)?.name ?? "—",
     });
-
-    return {
-      cells,
-      daily,
-      total: daily.reduce((sum, item) => sum + item.count, 0),
-      longest: Math.max(0, ...daily.map((item) => item.continuous)),
-    };
-  }, [
-    routineTeacherId,
-    effectiveRoutines,
-    sections,
-    classes,
-    subjectMap,
-    rooms,
-  ]);
+  }, [routineTeacherId, effectiveRoutines, sections, classes, subjectMap, rooms]);
 
   const dayRoutines = useMemo(() => {
     if (!selectedTeacherId || dayIndex === null) return [];
