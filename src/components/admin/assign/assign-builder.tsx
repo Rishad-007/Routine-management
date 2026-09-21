@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   assignTeacherPeriod,
+  toggleTeacherOpen,
   unassignTeacherPeriod,
   type AssignmentRole,
 } from "@/app/admin/assign/actions";
@@ -90,6 +91,7 @@ export function AssignBuilder({
   const [pending, startTransition] = useTransition();
   const [teacherId, setTeacherId] = useState<string | null>(initialTeacherId);
   const [search, setSearch] = useState("");
+  const [teachersState, setTeachersState] = useState<TeacherRow[]>(teachers);
   const [target, setTarget] = useState<CellTarget | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [roleChoice, setRoleChoice] = useState<{
@@ -131,17 +133,17 @@ export function AssignBuilder({
     return map;
   }, [teacherSubjects]);
 
-  const teacher = teachers.find((t) => t.id === teacherId) ?? null;
+  const teacher = teachersState.find((t) => t.id === teacherId) ?? null;
 
   const filteredTeachers = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return teachers;
-    return teachers.filter(
+    if (!q) return teachersState;
+    return teachersState.filter(
       (t) =>
         t.full_name.toLowerCase().includes(q) ||
         t.teacher_code.toLowerCase().includes(q),
     );
-  }, [teachers, search]);
+  }, [teachersState, search]);
 
   /** This teacher's own cells, keyed "day:period". */
   const ownCells = useMemo(() => {
@@ -198,15 +200,20 @@ export function AssignBuilder({
     return classes.filter((c) => ids.has(c.id));
   }, [classes, sectionOptions]);
 
-  // Subjects this teacher is qualified for, matching the routine builder's rule.
+  // All subjects are assignable regardless of the teacher's specialty list —
+  // the admin picks what the class period actually is. A teacher's own subjects
+  // are surfaced first so specialties are easy to spot.
   const subjectOptions = useMemo(() => {
     if (!teacher) return subjects;
-    if (teacher.is_open_teacher) return subjects;
     const owned = subjectsByTeacher.get(teacher.id);
-    const eligible = subjects.filter(
-      (s) => s.id === teacher.primary_subject_id || owned?.has(s.id),
+    if (!owned) return subjects;
+    const own = subjects.filter(
+      (s) => s.id === teacher.primary_subject_id || owned.has(s.id),
     );
-    return eligible.length > 0 ? eligible : subjects;
+    const rest = subjects.filter(
+      (s) => s.id !== teacher.primary_subject_id && !owned.has(s.id),
+    );
+    return [...own, ...rest];
   }, [teacher, subjects, subjectsByTeacher]);
 
   function openCell(day: number, period: number) {
@@ -259,6 +266,27 @@ export function AssignBuilder({
     });
   }
 
+  function toggleOpen(t: TeacherRow) {
+    startTransition(async () => {
+      const res = await toggleTeacherOpen(t.id, !t.is_open_teacher);
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      setTeachersState((prev) =>
+        prev.map((x) =>
+          x.id === t.id ? { ...x, is_open_teacher: res.open } : x,
+        ),
+      );
+      toast.success(
+        res.open
+          ? `${t.full_name} can now teach any subject`
+          : `${t.full_name} is restricted to their own subjects again`,
+      );
+      router.refresh();
+    });
+  }
+
   function remove() {
     if (!removing) return;
     startTransition(async () => {
@@ -299,7 +327,7 @@ export function AssignBuilder({
           </div>
           <div className="max-h-[520px] space-y-1 overflow-y-auto">
             {filteredTeachers.map((t) => (
-              <button
+              <div
                 key={t.id}
                 onClick={() => setTeacherId(t.id)}
                 className={cn(
@@ -309,7 +337,37 @@ export function AssignBuilder({
                     : "hover:bg-slate-100",
                 )}
               >
-                <p className="font-medium">{t.full_name}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTeacherId(t.id)}
+                    className="min-w-0 truncate text-left font-medium"
+                  >
+                    {t.full_name}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleOpen(t);
+                    }}
+                    title={
+                      t.is_open_teacher
+                        ? "Open teacher — teach any subject. Click to restrict."
+                        : "Fixed teacher. Click to make open — can teach any subject."
+                    }
+                    className={cn(
+                      "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors",
+                      t.is_open_teacher
+                        ? "border-amber-300 bg-amber-100 text-amber-700 hover:bg-amber-200"
+                        : t.id === teacherId
+                          ? "border-white/40 text-white/80 hover:border-white hover:bg-white/10"
+                          : "border-slate-200 text-slate-400 hover:bg-amber-50 hover:text-amber-600",
+                    )}
+                  >
+                    {t.is_open_teacher ? "Open · off" : "Open"}
+                  </button>
+                </div>
                 <p
                   className={cn(
                     "truncate text-xs",
@@ -318,7 +376,7 @@ export function AssignBuilder({
                 >
                   {t.teacher_code} · {t.full_name}
                 </p>
-              </button>
+              </div>
             ))}
             {filteredTeachers.length === 0 && (
               <p className="text-sm text-slate-400">No teachers match.</p>

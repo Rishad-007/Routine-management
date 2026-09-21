@@ -72,6 +72,7 @@ import type {
   ClassRow,
   SectionRow,
   TeacherRow,
+  TeacherSubjectRow,
   SubjectRow,
   RoomRow,
   RoutineRow,
@@ -82,6 +83,7 @@ interface Props {
   classes: ClassRow[];
   sections: SectionRow[];
   teachers: TeacherRow[];
+  teacherSubjects: TeacherSubjectRow[];
   subjects: SubjectRow[];
   rooms: RoomRow[];
   routines: RoutineRow[];
@@ -100,6 +102,7 @@ function toDateInput(d: Date) {
 interface DayCell {
   period: number;
   sectionId: string;
+  subjectId: string | null;
   subjectName: string;
   className: string;
   sectionName: string;
@@ -125,6 +128,7 @@ export function AdjustBuilder({
   classes,
   sections,
   teachers,
+  teacherSubjects,
   subjects,
   rooms,
   routines,
@@ -154,6 +158,7 @@ export function AdjustBuilder({
   const [sheetTab, setSheetTab] = useState<"primary" | "tag">("primary");
   const [teacherSearch, setTeacherSearch] = useState("");
   const [sheetSearch, setSheetSearch] = useState("");
+  const [sheetSubjectFilter, setSheetSubjectFilter] = useState("");
   const [saving, setSaving] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -206,6 +211,15 @@ export function AdjustBuilder({
     () => new Map(subjects.map((s) => [s.id, s])),
     [subjects],
   );
+
+  const subjectsByTeacher = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const ts of teacherSubjects) {
+      if (!map.has(ts.teacher_id)) map.set(ts.teacher_id, new Set());
+      map.get(ts.teacher_id)!.add(ts.subject_id);
+    }
+    return map;
+  }, [teacherSubjects]);
 
   const adjustmentHistory = useMemo(() => {
     const groups = new Map<string, AdjustmentRow[]>();
@@ -346,6 +360,7 @@ export function AdjustBuilder({
       cells.push({
         period: p,
         sectionId: primary.section_id,
+        subjectId: primary.subject_id,
         subjectName: subject?.name ?? "—",
         className: classRow?.name ?? "—",
         sectionName: sectionRow?.name ?? "—",
@@ -428,15 +443,25 @@ export function AdjustBuilder({
       );
   }, [teachers, effectiveIndex, dayIndex, sheetPeriod]);
 
-  const filteredFreeTeachers = useMemo(() => {
-    if (!sheetSearch.trim()) return freeTeachersForSheet;
-    const q = sheetSearch.toLowerCase();
+  const subjectFilteredTeachers = useMemo(() => {
+    if (!sheetSubjectFilter) return freeTeachersForSheet;
     return freeTeachersForSheet.filter(
+      (t) =>
+        t.is_open_teacher ||
+        t.primary_subject_id === sheetSubjectFilter ||
+        subjectsByTeacher.get(t.id)?.has(sheetSubjectFilter),
+    );
+  }, [freeTeachersForSheet, sheetSubjectFilter, subjectsByTeacher]);
+
+  const filteredFreeTeachers = useMemo(() => {
+    if (!sheetSearch.trim()) return subjectFilteredTeachers;
+    const q = sheetSearch.toLowerCase();
+    return subjectFilteredTeachers.filter(
       (t) =>
         t.full_name.toLowerCase().includes(q) ||
         t.teacher_code.toLowerCase().includes(q),
     );
-  }, [freeTeachersForSheet, sheetSearch]);
+  }, [subjectFilteredTeachers, sheetSearch]);
 
   const handleCellClick = (
     period: number,
@@ -446,8 +471,20 @@ export function AdjustBuilder({
     setSheetPeriod(period);
     setSheetTab(tab);
     setSheetSearch("");
+    setSheetSubjectFilter(getSheetFilterSubject(period, tab));
     setSheetOpen(true);
   };
+
+  /** Subject to filter substitutes on by default, matching the cell's session. */
+  function getSheetFilterSubject(
+    period: number,
+    tab: "primary" | "tag",
+  ): string {
+    const cell = dayCells.find((c) => c.period === period);
+    if (!cell) return "";
+    if (tab === "tag") return cell.tagSubjectId ?? "";
+    return cell.subjectId ?? "";
+  }
 
   const handleAssignPrimary = (period: number, newTeacherId: string) => {
     const cell = dayCells.find((c) => c.period === period);
@@ -1376,6 +1413,7 @@ export function AdjustBuilder({
                         newSubjectId: v === "none" ? null : v,
                       },
                     }));
+                    setSheetSubjectFilter(v === "none" ? "" : v ?? "");
                   }}
                   items={[
                     { value: "none", label: "— Same —" },
@@ -1440,21 +1478,53 @@ export function AdjustBuilder({
           )}
 
           <div className="px-4">
-            <div className="relative mb-3">
-              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input
-                placeholder="Search by name or code..."
-                value={sheetSearch}
-                onChange={(e) => setSheetSearch(e.target.value)}
-                className="pl-8"
-              />
+            <div className="mb-3 flex items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  placeholder="Search by name or code..."
+                  value={sheetSearch}
+                  onChange={(e) => setSheetSearch(e.target.value)}
+                  className="pl-8"
+                />
+              </div>
+              <Select
+                value={sheetSubjectFilter}
+                onValueChange={(v) => setSheetSubjectFilter(v ?? "")}
+                items={[
+                  { value: "", label: "All subjects" },
+                  ...subjects.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+              >
+                <SelectTrigger className="w-52 shrink-0">
+                  <SelectValue placeholder="Filter by subject" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All subjects</SelectItem>
+                  {subjects.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+
+            {sheetSubjectFilter && (
+              <p className="mb-2 px-1 text-[11px] text-slate-400">
+                Showing teachers who teach{" "}
+                <strong className="text-slate-600">
+                  {subjectMap.get(sheetSubjectFilter)?.name}
+                </strong>{" "}
+                (open teachers always qualify).
+              </p>
+            )}
 
             <div className="mb-3 flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2 text-sm">
               <span className="text-slate-600">
                 <strong className="text-emerald-700">
                   {
-                    freeTeachersForSheet.filter(
+                    subjectFilteredTeachers.filter(
                       (t) => !t.busy || t.id === selectedTeacherId,
                     ).length
                   }
@@ -1462,7 +1532,7 @@ export function AdjustBuilder({
                 available /{" "}
                 <strong className="text-slate-800">
                   {
-                    freeTeachersForSheet.filter(
+                    subjectFilteredTeachers.filter(
                       (t) => t.busy && t.id !== selectedTeacherId,
                     ).length
                   }
@@ -1477,7 +1547,9 @@ export function AdjustBuilder({
             <div className="max-h-[calc(100vh-24rem)] space-y-2 overflow-y-auto pr-1">
               {filteredFreeTeachers.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">
-                  No free teachers available
+                  {sheetSubjectFilter
+                    ? "No teachers teach this subject (or match the search)."
+                    : "No free teachers available"}
                 </p>
               ) : (
                 filteredFreeTeachers.map((t) => {

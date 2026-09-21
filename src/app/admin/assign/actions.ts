@@ -303,6 +303,24 @@ export async function assignTeacherPeriod(
   return { success: true, role };
 }
 
+export async function toggleTeacherOpen(
+  teacherId: string,
+  open: boolean,
+): Promise<{ error: string } | { success: true; open: boolean }> {
+  const { admin } = await authed();
+  if (!teacherId) return { error: "Pick a teacher." };
+
+  const { error } = await admin
+    .from("teachers")
+    .update({ is_open_teacher: open })
+    .eq("id", teacherId);
+  if (error) return { error: error.message };
+
+  revalidateRoutinePaths();
+  revalidatePath("/admin/master-data");
+  return { success: true, open };
+}
+
 export interface UnassignInput {
   sectionId: string;
   day: number;
