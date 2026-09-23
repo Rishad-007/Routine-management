@@ -1,10 +1,23 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { periodRangesForClassName } from "@/lib/class-period-rules";
 import type { RoomRow } from "@/lib/types";
+
+// Master-data writes are rare, so invalidate every read cache related to this
+// tool on each save — safe and keeps all pages coherent after edits.
+function invalidateMasterDataTags() {
+  revalidateTag("classes");
+  revalidateTag("sections");
+  revalidateTag("teachers");
+  revalidateTag("subjects");
+  revalidateTag("rooms");
+  revalidateTag("teacher-subjects");
+  revalidateTag("class-period-rules");
+  revalidateTag("settings");
+}
 
 // ---------------- Classes ----------------
 
@@ -38,6 +51,7 @@ export async function createClass(name: string, sortOrder: number) {
   }
 
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -51,6 +65,7 @@ export async function updateClass(id: string, name: string, sortOrder: number) {
     .eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -59,6 +74,7 @@ export async function deleteClass(id: string) {
   const { error } = await admin.from("classes").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -119,6 +135,7 @@ export async function createSection(
     .insert({ class_id: classId, name: trimmed, room_id: resolved.roomId, fixed_room: fixedRoom });
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -142,6 +159,7 @@ export async function updateSection(
     .eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -150,6 +168,7 @@ export async function deleteSection(id: string) {
   const { error } = await admin.from("sections").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -168,6 +187,7 @@ export async function createRoom(name: string) {
     .single();
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true, room: data as RoomRow };
 }
 
@@ -178,6 +198,7 @@ export async function updateRoom(id: string, name: string) {
   const { error } = await admin.from("rooms").update({ name: trimmed }).eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -186,6 +207,7 @@ export async function deleteRoom(id: string) {
   const { error } = await admin.from("rooms").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -200,6 +222,7 @@ export async function createSubject(name: string, shortName: string) {
     .insert({ name: name.trim(), short_name: shortName.trim() });
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -213,6 +236,7 @@ export async function updateSubject(id: string, name: string, shortName: string)
     .eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -221,6 +245,7 @@ export async function deleteSubject(id: string) {
   const { error } = await admin.from("subjects").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -269,6 +294,7 @@ export async function createTeacher(input: {
   if (getErr) return { error: getErr.message };
   await assignSubjects(admin, (data as { id: string }).id, input.subjectIds);
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -302,6 +328,7 @@ export async function updateTeacher(
   if (error) return { error: error.message };
   await assignSubjects(admin, id, input.subjectIds);
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -310,6 +337,7 @@ export async function deleteTeacher(id: string) {
   const { error } = await admin.from("teachers").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -344,6 +372,7 @@ export async function createAdmin(username: string, password: string, role: "sup
   });
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }
 
@@ -354,5 +383,6 @@ export async function deleteAdmin(id: string) {
   const { error } = await admin.from("admins").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/admin/master-data");
+  invalidateMasterDataTags();
   return { success: true };
 }

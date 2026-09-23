@@ -11,7 +11,7 @@ import type { Season } from "@/lib/constants";
 import { getTodayLocal } from "@/lib/periods";
 import { HomeContent } from "@/components/public/home-content";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export default async function HomePage() {
   const [classes, sections, teachers, subjects, routines, adjustments, season] =

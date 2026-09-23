@@ -1,5 +1,6 @@
 import "server-only";
-import { createClient } from "./supabase/server";
+import { unstable_cache } from "next/cache";
+import { createAdminClient } from "./supabase/admin";
 import { getTodayLocal } from "./periods";
 import {
   type ClassRow,
@@ -15,9 +16,13 @@ import {
 } from "./types";
 import type { ClassPeriodRule } from "./class-period-rules";
 
-async function db() {
-  return createClient();
-}
+// Service-role client (server-only). The read getters are wrapped in
+// `unstable_cache`, whose cached callbacks must NOT touch request-scoped APIs
+// like cookies() — the anon SSR client from "./supabase/server" reads cookies,
+// which silently disables caching. The service-role client bypasses RLS and
+// returns identical data, so cached reads stay consistent across every page
+// and route.
+const db = () => createAdminClient();
 
 // ---------------- Paged reads ----------------
 
@@ -95,91 +100,124 @@ export async function fetchAllRows<T>(
 }
 
 // ---------------- Master data reads ----------------
-// NOTE: db() is the anon-key SSR client, not the service-role client — these
-// reads depend on the "Public read" RLS policies in supabase/schema.sql. A table
-// without such a policy returns [] rather than an error.
+// All reads are memoized with `unstable_cache` (60s TTL + on-demand tag
+// invalidation from server actions). This turns ~a dozen Supabase round trips
+// per page load (including getRoutines()' 4-page walk of 3,060 rows) into a
+// single cache hit. Writes invalidate the tags with revalidateTag() in the
+// server action files, so data is never stale after a save.
 
-export async function getClasses(): Promise<ClassRow[]> {
-  const { data, error } = await (await db())
-    .from("classes")
-    .select("*")
-    .order("sort_order", { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data as ClassRow[]) ?? [];
-}
+const CACHE_SECONDS = 60;
 
-export async function getSections(): Promise<SectionRow[]> {
-  const { data, error } = await (await db()).from("sections").select("*");
-  if (error) throw new Error(error.message);
-  return (data as SectionRow[]) ?? [];
-}
+export const getClasses = unstable_cache(
+  async (): Promise<ClassRow[]> => {
+    const { data, error } = await db()
+      .from("classes")
+      .select("*")
+      .order("sort_order", { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data as ClassRow[]) ?? [];
+  },
+  ["classes"],
+  { tags: ["classes"], revalidate: CACHE_SECONDS },
+);
 
-export async function getClassPeriodRules(): Promise<ClassPeriodRule[]> {
-  const { data, error } = await (await db())
-    .from("class_period_rules")
-    .select("*");
-  if (error) throw new Error(error.message);
-  return ((data as ClassPeriodRuleRow[]) ?? []).map((r) => ({
-    classId: r.class_id,
-    day: r.day,
-    minPeriod: r.min_period,
-    maxPeriod: r.max_period,
-  }));
-}
+export const getSections = unstable_cache(
+  async (): Promise<SectionRow[]> => {
+    const { data, error } = await db().from("sections").select("*");
+    if (error) throw new Error(error.message);
+    return (data as SectionRow[]) ?? [];
+  },
+  ["sections"],
+  { tags: ["sections"], revalidate: CACHE_SECONDS },
+);
 
-export async function getRooms(): Promise<RoomRow[]> {
-  const { data, error } = await (await db())
-    .from("rooms")
-    .select("*")
-    .order("name");
-  if (error) throw new Error(error.message);
-  return (data as RoomRow[]) ?? [];
-}
+export const getClassPeriodRules = unstable_cache(
+  async (): Promise<ClassPeriodRule[]> => {
+    const { data, error } = await db().from("class_period_rules").select("*");
+    if (error) throw new Error(error.message);
+    return ((data as ClassPeriodRuleRow[]) ?? []).map((r) => ({
+      classId: r.class_id,
+      day: r.day,
+      minPeriod: r.min_period,
+      maxPeriod: r.max_period,
+    }));
+  },
+  ["class-period-rules"],
+  { tags: ["class-period-rules"], revalidate: CACHE_SECONDS },
+);
 
-export async function getSubjects(): Promise<SubjectRow[]> {
-  const { data, error } = await (await db())
-    .from("subjects")
-    .select("*")
-    .order("name");
-  if (error) throw new Error(error.message);
-  return (data as SubjectRow[]) ?? [];
-}
+export const getRooms = unstable_cache(
+  async (): Promise<RoomRow[]> => {
+    const { data, error } = await db().from("rooms").select("*").order("name");
+    if (error) throw new Error(error.message);
+    return (data as RoomRow[]) ?? [];
+  },
+  ["rooms"],
+  { tags: ["rooms"], revalidate: CACHE_SECONDS },
+);
 
-export async function getTeachers(): Promise<TeacherRow[]> {
-  const { data, error } = await (await db())
-    .from("teachers")
-    .select("*")
-    .order("full_name");
-  if (error) throw new Error(error.message);
-  return (data as TeacherRow[]) ?? [];
-}
+export const getSubjects = unstable_cache(
+  async (): Promise<SubjectRow[]> => {
+    const { data, error } = await db()
+      .from("subjects")
+      .select("*")
+      .order("name");
+    if (error) throw new Error(error.message);
+    return (data as SubjectRow[]) ?? [];
+  },
+  ["subjects"],
+  { tags: ["subjects"], revalidate: CACHE_SECONDS },
+);
 
-export async function getTeacherSubjects(): Promise<TeacherSubjectRow[]> {
-  const { data, error } = await (await db())
-    .from("teacher_subjects")
-    .select("*");
-  if (error) throw new Error(error.message);
-  return (data as TeacherSubjectRow[]) ?? [];
-}
+export const getTeachers = unstable_cache(
+  async (): Promise<TeacherRow[]> => {
+    const { data, error } = await db()
+      .from("teachers")
+      .select("*")
+      .order("full_name");
+    if (error) throw new Error(error.message);
+    return (data as TeacherRow[]) ?? [];
+  },
+  ["teachers"],
+  { tags: ["teachers"], revalidate: CACHE_SECONDS },
+);
 
-export async function getRoutines(sectionId?: string): Promise<RoutineRow[]> {
-  const client = await db();
-  return fetchAllRows<RoutineRow>(() => {
-    let q = client.from("routines").select("*", { count: "exact" });
-    if (sectionId) q = q.eq("section_id", sectionId);
-    return q as unknown as PagedQuery<RoutineRow>;
-  });
-}
+export const getTeacherSubjects = unstable_cache(
+  async (): Promise<TeacherSubjectRow[]> => {
+    const { data, error } = await db().from("teacher_subjects").select("*");
+    if (error) throw new Error(error.message);
+    return (data as TeacherSubjectRow[]) ?? [];
+  },
+  ["teacher-subjects"],
+  { tags: ["teacher-subjects"], revalidate: CACHE_SECONDS },
+);
 
-export async function getAdjustments(): Promise<AdjustmentRow[]> {
-  const today = getTodayLocal();
-  const { data, error } = await (await db())
-    .from("adjustments")
-    .select("*")
-    .gte("adjust_date", today);
-  if (error) throw new Error(error.message);
-  return (data as AdjustmentRow[]) ?? [];
-}
+export const getRoutines = unstable_cache(
+  async (sectionId?: string): Promise<RoutineRow[]> => {
+    const client = db();
+    return fetchAllRows<RoutineRow>(() => {
+      let q = client.from("routines").select("*", { count: "exact" });
+      if (sectionId) q = q.eq("section_id", sectionId);
+      return q as unknown as PagedQuery<RoutineRow>;
+    });
+  },
+  ["routines"],
+  { tags: ["routines"], revalidate: CACHE_SECONDS },
+);
+
+export const getAdjustments = unstable_cache(
+  async (): Promise<AdjustmentRow[]> => {
+    const today = getTodayLocal();
+    const { data, error } = await db()
+      .from("adjustments")
+      .select("*")
+      .gte("adjust_date", today);
+    if (error) throw new Error(error.message);
+    return (data as AdjustmentRow[]) ?? [];
+  },
+  ["adjustments"],
+  { tags: ["adjustments"], revalidate: CACHE_SECONDS },
+);
 
 /**
  * All adjustments across every date (historical + future).
@@ -187,31 +225,44 @@ export async function getAdjustments(): Promise<AdjustmentRow[]> {
  * viewable and downloadable. Public routine views keep using
  * getAdjustments() (>= today) so the routine rolls back automatically.
  */
-export async function getAllAdjustments(): Promise<AdjustmentRow[]> {
-  const client = await db();
-  // Page on the primary key — adjust_date is not unique, so it cannot give the
-  // stable total order paging requires. Sort by date afterwards.
-  const rows = await fetchAllRows<AdjustmentRow>(
-    () =>
-      client
-        .from("adjustments")
-        .select("*", { count: "exact" }) as unknown as PagedQuery<AdjustmentRow>,
-  );
-  return rows.sort((a, b) => b.adjust_date.localeCompare(a.adjust_date));
-}
+export const getAllAdjustments = unstable_cache(
+  async (): Promise<AdjustmentRow[]> => {
+    const client = db();
+    // Page on the primary key — adjust_date is not unique, so it cannot give the
+    // stable total order paging requires. Sort by date afterwards.
+    const rows = await fetchAllRows<AdjustmentRow>(
+      () =>
+        client
+          .from("adjustments")
+          .select("*", { count: "exact" }) as unknown as PagedQuery<AdjustmentRow>,
+    );
+    // Copy before sorting — the cached value is returned by reference.
+    return rows.slice().sort((a, b) => b.adjust_date.localeCompare(a.adjust_date));
+  },
+  ["adjustments-all"],
+  { tags: ["adjustments"], revalidate: CACHE_SECONDS },
+);
 
-export async function getSettings(): Promise<SettingsRow[]> {
-  const { data, error } = await (await db()).from("settings").select("*");
-  if (error) throw new Error(error.message);
-  return (data as SettingsRow[]) ?? [];
-}
+export const getSettings = unstable_cache(
+  async (): Promise<SettingsRow[]> => {
+    const { data, error } = await db().from("settings").select("*");
+    if (error) throw new Error(error.message);
+    return (data as SettingsRow[]) ?? [];
+  },
+  ["settings"],
+  { tags: ["settings"], revalidate: CACHE_SECONDS },
+);
 
-export async function getSetting(key: string): Promise<string | null> {
-  const { data, error } = await (await db())
-    .from("settings")
-    .select("value")
-    .eq("key", key)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data?.value as string | undefined) ?? null;
-}
+export const getSetting = unstable_cache(
+  async (key: string): Promise<string | null> => {
+    const { data, error } = await db()
+      .from("settings")
+      .select("value")
+      .eq("key", key)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data?.value as string | undefined) ?? null;
+  },
+  ["settings"],
+  { tags: ["settings"], revalidate: CACHE_SECONDS },
+);

@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import {
   applyAdjustmentsToRoutines,
@@ -343,5 +343,6 @@ export async function saveAllAdjustments(
   revalidatePath("/");
   revalidatePath("/routine");
   revalidatePath("/teacher");
+  revalidateTag("adjustments");
   return { success: true, savedCount };
 }

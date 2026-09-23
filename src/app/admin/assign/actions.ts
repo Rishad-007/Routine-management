@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import {
   buildRoutineIndex,
@@ -52,6 +52,7 @@ function revalidateRoutinePaths() {
   revalidatePath("/");
   revalidatePath("/routine");
   revalidatePath("/teacher");
+  revalidateTag("routines");
 }
 
 /**
@@ -318,6 +319,7 @@ export async function toggleTeacherOpen(
 
   revalidateRoutinePaths();
   revalidatePath("/admin/master-data");
+  revalidateTag("teachers");
   return { success: true, open };
 }
 

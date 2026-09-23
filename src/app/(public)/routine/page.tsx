@@ -14,7 +14,7 @@ import type { Season } from "@/lib/constants";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
 import { RoutineViewer } from "@/components/public/routine-viewer";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export default async function RoutinePage({
   searchParams,

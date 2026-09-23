@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { authed } from "@/app/admin/auth-helpers";
 import {
   allTeacherLoadsIndexed,
@@ -235,6 +235,7 @@ export async function saveSectionRoutine(
   revalidatePath("/");
   revalidatePath("/routine");
   revalidatePath("/teacher");
+  revalidateTag("routines");
   return {
     success: true,
     savedCount: insertRows.length,

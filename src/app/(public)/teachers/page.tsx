@@ -5,7 +5,7 @@ import {
 } from "@/lib/data";
 import { TeachersDirectory } from "@/components/public/teachers-directory";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export default async function TeachersPage() {
   const [teachers, subjects, teacherSubjects] = await Promise.all([
