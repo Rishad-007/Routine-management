@@ -63,11 +63,12 @@ export function TeacherRoutineViewer({
   const downloadPdf = () => {
     if (!selected) return;
     setPdfLoading(true);
-    window.open(
-      `/api/teacher-routine.pdf?teacher=${selected}`,
-      "_blank",
-      "noopener"
-    );
+    const a = document.createElement("a");
+    a.href = `/api/teacher-routine.pdf?teacher=${selected}`;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     setTimeout(() => setPdfLoading(false), 2500);
   };
 

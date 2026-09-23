@@ -291,13 +291,20 @@ export interface AssignmentSimulation {
 }
 
 /**
- * Simulate assigning a teacher to a day+period.
- * Removes any existing assignment at that cell (identified by sectionId+day+period)
- * and inserts the new one, then checks the adjusted thresholds.
+ * Simulate a teacher taking a day+period.
  *
- * Thresholds (teacher-first adjust):
- * - yellow: >= 4 periods that day, OR creates 3-consecutive, OR teacher is busy at day+period
- * - red: >= 5 periods that day, OR creates 4-consecutive
+ * Replaces whatever currently occupies the cell for that section
+ * (identified by sectionId+day+period+isTag) and inserts the candidate into it,
+ * then grades the result:
+ *
+ * - busy: the candidate already teaches another section at day+period
+ *   (hard block, cannot be force-approved).
+ * - day load: red when the teacher ALREADY has 5 classes that day, yellow at 4.
+ * - continuous: yellow when the new class makes a run of 3, red at 4 or more.
+ *   Tiffin (after period 4) breaks runs, so a pre-tiffin class never joins a
+ *   post-tiffin one.
+ *
+ * `count`/`stretch` returned are the true POST-assignment projections.
  */
 export function simulateTeacherAssignment(
   routines: RoutineRow[],
@@ -305,11 +312,13 @@ export function simulateTeacherAssignment(
   day: number,
   period: number,
   excludeSectionId?: string,
+  isTag = false,
 ): AssignmentSimulation {
   const existingCell = routines.find(
     (r) =>
       r.day === day &&
       r.period_number === period &&
+      r.is_tag === isTag &&
       (excludeSectionId ? r.section_id === excludeSectionId : true) &&
       r.teacher_id !== teacherId,
   );
@@ -319,13 +328,28 @@ export function simulateTeacherAssignment(
       !(
         r.day === day &&
         r.period_number === period &&
+        r.is_tag === isTag &&
         r.section_id === existingCell?.section_id
       ),
   );
 
+  const inserted: RoutineRow = {
+    id: "simulated",
+    section_id: existingCell?.section_id ?? excludeSectionId ?? "",
+    day,
+    period_number: period,
+    teacher_id: teacherId,
+    subject_id: existingCell?.subject_id ?? null,
+    room_id: existingCell?.room_id ?? null,
+    is_tag: isTag,
+    is_adjusted: false,
+    original_teacher_id: null,
+  };
+  simulated.push(inserted);
+
   const count = countDayPeriods(simulated, teacherId, day);
   const stretch = longestConsecutiveStretch(simulated, teacherId, day);
-  const busy = isTeacherBusy(simulated, teacherId, day, period);
+  const busy = isTeacherBusy(simulated, teacherId, day, period, inserted.id);
 
   const reasons: string[] = [];
 
@@ -333,20 +357,24 @@ export function simulateTeacherAssignment(
     reasons.push("Teacher already assigned elsewhere at this period");
   }
 
-  if (count >= 5) {
-    reasons.push(`${count + 1} periods that day (exceeds safe limit)`);
-  } else if (count >= 4) {
-    reasons.push(`${count + 1} periods that day`);
+  // Load rule grades against the ALREADY-assigned count (the day the teacher
+  // had before this class). count - 1 excludes the projected row.
+  const alreadyAssigned = count - 1;
+  if (alreadyAssigned >= 5) {
+    reasons.push(`${alreadyAssigned} classes already that day`);
+  } else if (alreadyAssigned === 4) {
+    reasons.push(`${alreadyAssigned} classes already that day`);
   }
 
+  // Continuous rule grades the projected run.
   if (stretch >= 4) {
-    reasons.push(`Would create ${stretch + 1} consecutive periods`);
-  } else if (stretch >= 3) {
-    reasons.push(`Would create ${stretch + 1} consecutive periods`);
+    reasons.push(`Would have ${stretch} consecutive periods`);
+  } else if (stretch === 3) {
+    reasons.push(`Would have ${stretch} consecutive periods`);
   }
 
-  const isRed = busy || count >= 5 || stretch >= 4;
-  const isYellow = !isRed && (count >= 4 || stretch >= 3);
+  const isRed = busy || alreadyAssigned >= 5 || stretch >= 4;
+  const isYellow = !isRed && (alreadyAssigned === 4 || stretch === 3);
 
   const level: "ok" | "yellow" | "red" = isRed
     ? "red"
@@ -354,7 +382,7 @@ export function simulateTeacherAssignment(
       ? "yellow"
       : "ok";
 
-  return { level, reasons, count: count + 1, stretch: stretch + 1 };
+  return { level, reasons, count, stretch };
 }
 
 export interface WeeklyLoad {

@@ -82,6 +82,15 @@ export async function fetchAllRows<T>(
     if (total !== null && rows.length >= total) break;
   }
 
+  // Fail-fast instead of silently returning a partial array. A truncated read
+  // here used to look like "no class at this period" — busy teachers could
+  // appear free. Every caller requests { count: "exact" }, so total is known.
+  if (total !== null && rows.length < total) {
+    throw new Error(
+      `fetchAllRows: incomplete read — got ${rows.length}/${total} of "${orderColumn}" after paging.`,
+    );
+  }
+
   return rows;
 }
 

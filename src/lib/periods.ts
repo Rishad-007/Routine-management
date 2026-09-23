@@ -163,23 +163,14 @@ export function getTodayLocal(reference?: Date): string {
 }
 
 /**
- * The client sends a calendar date from the browser's clock, but the routine
- * pages read "today" with the server's clock (`getTodayLocal()`). When the two
- * machines run in different timezones (e.g. Vercel/UTC vs a school in UTC+6),
- * the dates can drift by one day and matching adjustments silently fail.
- *
- * Normalize: any date within ±1 day of the server's "today" is coerced to the
- * server's authoritative date. Genuine future dates (planning ahead) survive.
+ * The date picked in the browser's UI is the single source of truth. Server
+ * revalidation trusts it as-is so that planning 2–3 days ahead (or further)
+ * lands on exactly the picked date & weekday — not silently coerced to the
+ * server's "today".
  */
 export function resolveAdjustDate(adjustDate: string): string | null {
   if (!adjustDate) return null;
-  const serverToday = getTodayLocal();
-  const diffDays = Math.round(
-    (new Date(adjustDate + "T00:00:00").getTime() -
-      new Date(serverToday + "T00:00:00").getTime()) /
-      86400000
-  );
-  return Math.abs(diffDays) <= 1 ? serverToday : adjustDate;
+  return adjustDate;
 }
 
 export type { TimeBlock };

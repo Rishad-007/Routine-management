@@ -187,11 +187,32 @@ export async function saveAllAdjustments(
     ),
   ];
 
+  // Fold the incoming batch into the day's schedule FIRST so multiple
+  // substitutions in the same save are cross-graded against each other — a
+  // choice that resolves one conflict is visible to the next, exactly matching
+  // what the client previews before saving.
+  const folded = routines.map((r) => ({ ...r }));
+  for (const c of changes) {
+    if (!c.newTeacherId) continue;
+    const target = folded.find(
+      (r) =>
+        r.day === dayIndex &&
+        r.period_number === c.period &&
+        r.section_id === c.sectionId &&
+        r.is_tag === c.isTag,
+    );
+    if (target) {
+      target.teacher_id = c.newTeacherId;
+      if (c.newSubjectId !== undefined) target.subject_id = c.newSubjectId;
+      if (c.newRoomId !== undefined) target.room_id = c.newRoomId;
+    }
+  }
+
   // HARD BLOCK — a substitute can NEVER be double-booked at the same
   // day+period in another section, regardless of the force flag.
   for (const c of changes) {
     if (!c.newTeacherId) continue;
-    const busy = routines.some(
+    const busy = folded.some(
       (r) =>
         r.day === dayIndex &&
         r.period_number === c.period &&
@@ -216,12 +237,37 @@ export async function saveAllAdjustments(
 
   for (const c of changes) {
     if (!c.newTeacherId) continue;
+
+    // Revert THIS one change on a copy so the simulation sees the other
+    // pending substitutions applied but not the one it is grading.
+    const simRoutines = folded.map((r) => ({ ...r }));
+    const foldedTarget = simRoutines.find(
+      (r) =>
+        r.day === dayIndex &&
+        r.period_number === c.period &&
+        r.section_id === c.sectionId &&
+        r.is_tag === c.isTag,
+    );
+    const baseRow = routines.find(
+      (r) =>
+        r.day === dayIndex &&
+        r.period_number === c.period &&
+        r.section_id === c.sectionId &&
+        r.is_tag === c.isTag,
+    );
+    if (foldedTarget && baseRow) {
+      foldedTarget.teacher_id = baseRow.teacher_id;
+      foldedTarget.subject_id = baseRow.subject_id;
+      foldedTarget.room_id = baseRow.room_id;
+    }
+
     const sim = simulateTeacherAssignment(
-      routines,
+      simRoutines,
       c.newTeacherId,
       dayIndex,
       c.period,
       c.sectionId,
+      c.isTag,
     );
     if (sim.level === "yellow") {
       warnings.push({

@@ -41,6 +41,7 @@ import {
   FileText,
   Loader2,
   Eye,
+  ChevronDown,
   History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -156,6 +157,7 @@ export function AdjustBuilder({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetPeriod, setSheetPeriod] = useState<number | null>(null);
   const [sheetTab, setSheetTab] = useState<"primary" | "tag">("primary");
+  const [expandedBusyId, setExpandedBusyId] = useState<string | null>(null);
   const [teacherSearch, setTeacherSearch] = useState("");
   const [sheetSearch, setSheetSearch] = useState("");
   const [sheetSubjectFilter, setSheetSubjectFilter] = useState("");
@@ -200,13 +202,8 @@ export function AdjustBuilder({
     ];
   }, [routines, adjustments, date, dayIndex]);
 
-  // One pass over the (now complete) routine set; every free/busy and load
-  // lookup below reads from this instead of rescanning 3000+ rows per teacher.
-  const effectiveIndex = useMemo(
-    () => buildRoutineIndex(effectiveRoutines),
-    [effectiveRoutines],
-  );
-
+  // Free/busy and load lookups below read from `pendingIndex` (this day only)
+  // instead of rescanning 3000+ rows per teacher.
   const subjectMap = useMemo(
     () => new Map(subjects.map((s) => [s.id, s])),
     [subjects],
@@ -400,14 +397,56 @@ export function AdjustBuilder({
     );
   }, [teachers, teacherSearch]);
 
+  // Fold the pending (unsaved) overrides into the active day's schedule so the
+  // candidate lists, busy states and load counts stay truthful WHILE editing —
+  // a teacher you just assigned turns busy/counts higher immediately, matching
+  // what a save would produce. Keeps effectiveRoutines untouched for display.
+  const pendingRoutines = useMemo(() => {
+    if (dayIndex === null) return effectiveRoutines;
+    const rows = effectiveRoutines.map((r) => ({ ...r }));
+    for (const [p, o] of Object.entries(overrides)) {
+      if (!o.newTeacherId) continue;
+      const target = rows.find(
+        (r) =>
+          r.day === dayIndex &&
+          r.period_number === Number(p) &&
+          r.section_id === o.sectionId &&
+          !r.is_tag,
+      );
+      if (target) target.teacher_id = o.newTeacherId;
+    }
+    for (const [p, to] of Object.entries(tagOverrides)) {
+      const cell = dayCells.find((c) => c.period === Number(p));
+      if (!cell || !to.newTeacherId) continue;
+      const target = rows.find(
+        (r) =>
+          r.day === dayIndex &&
+          r.period_number === Number(p) &&
+          r.section_id === cell.sectionId &&
+          r.is_tag,
+      );
+      if (target) {
+        target.teacher_id = to.newTeacherId;
+        if (to.newSubjectId !== undefined) target.subject_id = to.newSubjectId;
+        if (to.newRoomId !== undefined) target.room_id = to.newRoomId;
+      }
+    }
+    return rows;
+  }, [effectiveRoutines, overrides, tagOverrides, dayCells, dayIndex]);
+
+  const pendingIndex = useMemo(
+    () => buildRoutineIndex(pendingRoutines),
+    [pendingRoutines],
+  );
+
   const teacherDayCounts = useMemo(() => {
     const map = new Map<string, number>();
     if (dayIndex === null) return map;
     for (const t of teachers) {
-      map.set(t.id, dayCountIndexed(effectiveIndex, t.id, dayIndex));
+      map.set(t.id, dayCountIndexed(pendingIndex, t.id, dayIndex));
     }
     return map;
-  }, [teachers, effectiveIndex, dayIndex]);
+  }, [teachers, pendingIndex, dayIndex]);
 
   // Per-teacher stats for the active day: class count + longest continuous
   // stretch. Used by the teacher rail and the assignment sheet.
@@ -416,52 +455,94 @@ export function AdjustBuilder({
     if (dayIndex === null) return map;
     for (const t of teachers) {
       map.set(t.id, {
-        count: dayCountIndexed(effectiveIndex, t.id, dayIndex),
-        stretch: stretchIndexed(effectiveIndex, t.id, dayIndex),
+        count: dayCountIndexed(pendingIndex, t.id, dayIndex),
+        stretch: stretchIndexed(pendingIndex, t.id, dayIndex),
       });
     }
     return map;
-  }, [teachers, effectiveIndex, dayIndex]);
+  }, [teachers, pendingIndex, dayIndex]);
 
-  const freeTeachersForSheet = useMemo(() => {
+  // Authoritative busy set for the active period, built directly from the same
+  // rows the grid renders (adjustments + pending overrides included). The sheet
+  // shows busy teachers at the bottom, disabled — this set is the single source.
+  const busyTeachersForPeriod = useMemo(() => {
+    if (sheetPeriod === null || dayIndex === null) return new Set<string>();
+    const set = new Set<string>();
+    for (const r of pendingRoutines) {
+      if (r.day === dayIndex && r.period_number === sheetPeriod && r.teacher_id) {
+        set.add(r.teacher_id);
+      }
+    }
+    return set;
+  }, [pendingRoutines, dayIndex, sheetPeriod]);
+
+  const sheetTeacherRows = useMemo(() => {
     if (sheetPeriod === null || dayIndex === null) return [];
     return teachers
       .map((t) => ({
         ...t,
-        dayCount: dayCountIndexed(effectiveIndex, t.id, dayIndex),
-        stretch: stretchIndexed(effectiveIndex, t.id, dayIndex),
-        weekTotal: effectiveIndex.weeklyTotal.get(t.id) ?? 0,
-        busy: isBusyIndexed(effectiveIndex, t.id, dayIndex, sheetPeriod),
+        dayCount: dayCountIndexed(pendingIndex, t.id, dayIndex),
+        stretch: stretchIndexed(pendingIndex, t.id, dayIndex),
+        weekTotal: pendingIndex.weeklyTotal.get(t.id) ?? 0,
+        busy: busyTeachersForPeriod.has(t.id),
       }))
       .sort(
         (a, b) =>
-          Number(a.busy) - Number(b.busy) ||
           Number(b.is_open_teacher) - Number(a.is_open_teacher) ||
           a.dayCount - b.dayCount ||
           a.weekTotal - b.weekTotal ||
           a.full_name.localeCompare(b.full_name),
       );
-  }, [teachers, effectiveIndex, dayIndex, sheetPeriod]);
+  }, [teachers, pendingIndex, dayIndex, sheetPeriod, busyTeachersForPeriod]);
 
-  const subjectFilteredTeachers = useMemo(() => {
-    if (!sheetSubjectFilter) return freeTeachersForSheet;
-    return freeTeachersForSheet.filter(
+  const subjectMatchedSheetTeachers = useMemo(() => {
+    if (!sheetSubjectFilter) return sheetTeacherRows;
+    return sheetTeacherRows.filter(
       (t) =>
         t.is_open_teacher ||
         t.primary_subject_id === sheetSubjectFilter ||
         subjectsByTeacher.get(t.id)?.has(sheetSubjectFilter),
     );
-  }, [freeTeachersForSheet, sheetSubjectFilter, subjectsByTeacher]);
+  }, [sheetTeacherRows, sheetSubjectFilter, subjectsByTeacher]);
 
-  const filteredFreeTeachers = useMemo(() => {
-    if (!sheetSearch.trim()) return subjectFilteredTeachers;
+  const searchedSheetTeachers = useMemo(() => {
+    if (!sheetSearch.trim()) return subjectMatchedSheetTeachers;
     const q = sheetSearch.toLowerCase();
-    return subjectFilteredTeachers.filter(
+    return subjectMatchedSheetTeachers.filter(
       (t) =>
         t.full_name.toLowerCase().includes(q) ||
         t.teacher_code.toLowerCase().includes(q),
     );
-  }, [subjectFilteredTeachers, sheetSearch]);
+  }, [subjectMatchedSheetTeachers, sheetSearch]);
+
+  const freeSheetTeachers = useMemo(
+    () => searchedSheetTeachers.filter((t) => !t.busy),
+    [searchedSheetTeachers],
+  );
+  const busySheetTeachers = useMemo(
+    () => searchedSheetTeachers.filter((t) => t.busy),
+    [searchedSheetTeachers],
+  );
+
+  // The busy (disabled) section can expand a teacher to see the classes THEY
+  // teach on the selected day — i.e. why they are blocked at this period.
+  const teacherDaySchedule = (teacherId: string) => {
+    if (dayIndex === null) return [];
+    return pendingRoutines
+      .filter((r) => r.day === dayIndex && r.teacher_id === teacherId)
+      .map((r) => {
+        const s = sections.find((x) => x.id === r.section_id);
+        const c = s ? classes.find((x) => x.id === s.class_id) : undefined;
+        return {
+          period: r.period_number,
+          isTag: r.is_tag,
+          subjectName: r.subject_id ? subjectMap.get(r.subject_id)?.name : "—",
+          className: c?.name ?? "—",
+          sectionName: s?.name ?? "—",
+        };
+      })
+      .sort((a, b) => a.period - b.period);
+  };
 
   const handleCellClick = (
     period: number,
@@ -472,6 +553,7 @@ export function AdjustBuilder({
     setSheetTab(tab);
     setSheetSearch("");
     setSheetSubjectFilter(getSheetFilterSubject(period, tab));
+    setExpandedBusyId(null);
     setSheetOpen(true);
   };
 
@@ -499,7 +581,13 @@ export function AdjustBuilder({
       return;
     }
 
-    if (newTeacherId === cell.baseTeacherId) {
+    // Re-picking the current holder (the original teacher, a saved substitute,
+    // or someone already overridden this session) is a no-op: drop any pending
+    // override and keep whatever is currently scheduled.
+    if (
+      newTeacherId === cell.baseTeacherId ||
+      (cell.effectiveTeacherId && newTeacherId === cell.effectiveTeacherId)
+    ) {
       setOverrides((prev) => {
         const next = { ...prev };
         delete next[period];
@@ -510,16 +598,17 @@ export function AdjustBuilder({
     }
 
     const sim = simulateTeacherAssignment(
-      effectiveRoutines,
+      pendingRoutines,
       newTeacherId,
       dayIndex!,
       period,
       cell.sectionId,
+      false,
     );
 
     // HARD BLOCK: the substitute is already teaching another class at this
     // day+period. This is a double-booking and cannot be force-approved.
-    if (isBusyIndexed(effectiveIndex, newTeacherId, dayIndex!, period)) {
+    if (isBusyIndexed(pendingIndex, newTeacherId, dayIndex!, period)) {
       toast.error(
         "This teacher already has a class in another section at this period. Free them first before assigning.",
       );
@@ -569,6 +658,65 @@ export function AdjustBuilder({
         `${classForSection(cell.sectionId)?.name ?? "This class"} only has ${sectionPeriodRangeLabel(cell.sectionId, dayIndex!)} on ${DAY_LABEL_LIST[dayIndex!]} — period ${period} is not allowed for adjustments.`,
       );
       return;
+    }
+
+    // Picking the current tag holder (original, saved substitute, or a pending
+    // one) is a no-op: clear any pending override and keep the current state.
+    if (
+      cell.tagEffectiveTeacherId &&
+      newTeacherId === cell.tagEffectiveTeacherId
+    ) {
+      setTagOverrides((prev) => {
+        const next = { ...prev };
+        delete next[period];
+        return next;
+      });
+      setSheetOpen(false);
+      return;
+    }
+
+    // HARD BLOCK: the substitute is already teaching another class at this
+    // day+period (or will be, once pending edits save). Double-booking can
+    // never be force-approved.
+    if (isBusyIndexed(pendingIndex, newTeacherId, dayIndex!, period)) {
+      toast.error(
+        "This teacher already has a class in another section at this period. Free them first before assigning.",
+      );
+      return;
+    }
+
+    const sim = simulateTeacherAssignment(
+      pendingRoutines,
+      newTeacherId,
+      dayIndex!,
+      period,
+      cell.sectionId,
+      true,
+    );
+    if (sim.level === "red") {
+      setPendingRed({
+        adjustment: {
+          period,
+          sectionId: cell.sectionId,
+          isTag: true,
+          originalTeacherId: cell.tagEffectiveTeacherId,
+          newTeacherId,
+          originalSubjectId: null,
+          newSubjectId: null,
+          originalRoomId: null,
+          newRoomId: null,
+          reason: "",
+          level: "red",
+          reasons: sim.reasons,
+        },
+        reasons: sim.reasons,
+      });
+      return;
+    }
+    if (sim.level === "yellow") {
+      toast.warning(`Warning: ${sim.reasons.join("; ")}`, {
+        duration: 6000,
+      });
     }
 
     setTagOverrides((prev) => ({
@@ -712,11 +860,12 @@ export function AdjustBuilder({
       : null;
     if (!reportDate || reportDay === null) return;
     setReportLoading(true);
-    window.open(
-      `/api/adjust-report.pdf?date=${reportDate}`,
-      "_blank",
-      "noopener",
-    );
+    const a = document.createElement("a");
+    a.href = `/api/adjust-report.pdf?date=${reportDate}`;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     setTimeout(() => setReportLoading(false), 2500);
   };
 
@@ -941,8 +1090,8 @@ export function AdjustBuilder({
                 const isSelected = t.id === selectedTeacherId;
                 const dayCount = teacherDayCounts.get(t.id) ?? 0;
                 const stretch = teacherDayStats.get(t.id)?.stretch ?? 0;
-                const heavy = dayCount >= 5;
-                const red = dayCount >= 6;
+                const heavy = dayCount >= 4;
+                const red = dayCount >= 5;
                 return (
                   <button
                     key={t.id}
@@ -1523,19 +1672,11 @@ export function AdjustBuilder({
             <div className="mb-3 flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2 text-sm">
               <span className="text-slate-600">
                 <strong className="text-emerald-700">
-                  {
-                    subjectFilteredTeachers.filter(
-                      (t) => !t.busy || t.id === selectedTeacherId,
-                    ).length
-                  }
+                  {freeSheetTeachers.length}
                 </strong>{" "}
-                available /{" "}
-                <strong className="text-slate-800">
-                  {
-                    subjectFilteredTeachers.filter(
-                      (t) => t.busy && t.id !== selectedTeacherId,
-                    ).length
-                  }
+                free ·{" "}
+                <strong className="text-red-600">
+                  {busySheetTeachers.length}
                 </strong>{" "}
                 busy in P{sheetPeriod}
               </span>
@@ -1544,113 +1685,208 @@ export function AdjustBuilder({
               </span>
             </div>
 
-            <div className="max-h-[calc(100vh-24rem)] space-y-2 overflow-y-auto pr-1">
-              {filteredFreeTeachers.length === 0 ? (
+            <div className="max-h-[calc(100vh-24rem)] space-y-3 overflow-y-auto pr-1">
+              {freeSheetTeachers.length === 0 &&
+              busySheetTeachers.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">
                   {sheetSubjectFilter
                     ? "No teachers teach this subject (or match the search)."
-                    : "No free teachers available"}
+                    : "No teachers available"}
                 </p>
               ) : (
-                filteredFreeTeachers.map((t) => {
-                  const sim = simulateTeacherAssignment(
-                    effectiveRoutines,
-                    t.id,
-                    dayIndex!,
-                    sheetPeriod!,
-                    dayCells.find((c) => c.period === sheetPeriod)?.sectionId,
-                  );
-                  const levelColor =
-                    sim.level === "red"
-                      ? "border-red-300 bg-red-50"
-                      : sim.level === "yellow"
-                        ? "border-amber-300 bg-amber-50"
-                        : "border-slate-200 bg-white";
+                <>
+                  {freeSheetTeachers.map((t) => {
+                    const sim = simulateTeacherAssignment(
+                      pendingRoutines,
+                      t.id,
+                      dayIndex!,
+                      sheetPeriod!,
+                      dayCells.find((c) => c.period === sheetPeriod)?.sectionId,
+                      sheetTab === "tag",
+                    );
+                    const levelColor =
+                      sim.level === "red"
+                        ? "border-red-300 bg-red-50"
+                        : sim.level === "yellow"
+                          ? "border-amber-300 bg-amber-50"
+                          : "border-slate-200 bg-white";
 
-                  return (
-                    <div
-                      key={t.id}
-                      className={cn(
-                        "flex w-full items-start gap-2 rounded-lg border p-3 transition-colors",
-                        t.busy
-                          ? "cursor-not-allowed opacity-60"
-                          : "hover:border-[#0d9488] hover:bg-[#0d9488]/5",
-                        levelColor,
-                      )}
-                    >
-                      <button
-                        type="button"
-                        disabled={t.busy}
-                        onClick={() =>
-                          sheetTab === "tag"
-                            ? handleAssignTag(sheetPeriod!, t.id)
-                            : handleAssignPrimary(sheetPeriod!, t.id)
-                        }
-                        className="min-w-0 flex-1 text-left"
+                    return (
+                      <div
+                        key={t.id}
+                        className={cn(
+                          "flex w-full items-start gap-2 rounded-lg border p-3 transition-colors hover:border-[#0d9488] hover:bg-[#0d9488]/5",
+                          levelColor,
+                        )}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="flex items-center gap-1.5 font-medium text-slate-800">
-                            {t.full_name}
-                            {t.busy ? (
-                              <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
-                                busy
-                              </span>
-                            ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            sheetTab === "tag"
+                              ? handleAssignTag(sheetPeriod!, t.id)
+                              : handleAssignPrimary(sheetPeriod!, t.id)
+                          }
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-1.5 font-medium text-slate-800">
+                              {t.full_name}
                               <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
                                 free
                               </span>
-                            )}
-                          </span>
-                          <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <span>{t.dayCount}P day</span>
-                            <span>·</span>
-                            <span>
-                              {t.stretch >= 3 ? `${t.stretch} cont` : "—"}
                             </span>
-                            <span>·</span>
-                            <span>{t.weekTotal}P wk</span>
+                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                              <span>{t.dayCount}P day</span>
+                              <span>·</span>
+                              <span>
+                                {t.stretch >= 3 ? `${t.stretch} cont` : "—"}
+                              </span>
+                              <span>·</span>
+                              <span>{t.weekTotal}P wk</span>
+                            </div>
                           </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                            <span className="text-slate-400">
+                              {t.teacher_code}
+                            </span>
+                            {t.dayCount >= 5 && (
+                              <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">
+                                already {t.dayCount} classes today
+                              </span>
+                            )}
+                            {t.dayCount === 4 && (
+                              <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
+                                already {t.dayCount} classes today
+                              </span>
+                            )}
+                            {t.stretch >= 3 && (
+                              <span className="rounded bg-orange-100 px-1.5 py-0.5 font-medium text-orange-700">
+                                {t.stretch} continuous
+                              </span>
+                            )}
+                            {sim.level === "yellow" && (
+                              <span className="text-amber-600">
+                                ⚠ {sim.reasons.join("; ")}
+                              </span>
+                            )}
+                            {sim.level === "red" && (
+                              <span className="text-red-600">
+                                ✖ {sim.reasons.join("; ")}
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          title={`View ${t.full_name}'s routine`}
+                          aria-label={`View ${t.full_name}'s routine`}
+                          onClick={() => setRoutineTeacherId(t.id)}
+                          className="shrink-0"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+
+                  {busySheetTeachers.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="px-1 pt-1 font-semibold uppercase tracking-wide text-[10px] text-red-500">
+                        Busy in P{sheetPeriod} — tap to see their day
+                      </p>
+                      {busySheetTeachers.map((t) => (
+                        <div
+                          key={t.id}
+                          className="rounded-lg border border-red-200 bg-red-50/50"
+                        >
+                          <div className="flex w-full items-start gap-2 p-3">
+                            <button
+                              type="button"
+                              disabled
+                              className="min-w-0 flex-1 cursor-not-allowed text-left opacity-70"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="flex items-center gap-1.5 font-medium text-slate-800">
+                                  {t.full_name}
+                                  <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+                                    busy
+                                  </span>
+                                </span>
+                                <div className="flex items-center gap-2 text-xs text-slate-500">
+                                  <span>{t.dayCount}P day</span>
+                                  <span>·</span>
+                                  <span>{t.weekTotal}P wk</span>
+                                </div>
+                              </div>
+                              <div className="mt-1 text-xs text-red-600">
+                                {t.teacher_code}
+                              </div>
+                            </button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              title="See this teacher's class routine"
+                              aria-label="See this teacher's class routine"
+                              onClick={() =>
+                                setExpandedBusyId(
+                                  expandedBusyId === t.id ? null : t.id,
+                                )
+                              }
+                              className="shrink-0"
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  "h-4 w-4 transition-transform",
+                                  expandedBusyId === t.id && "rotate-180",
+                                )}
+                              />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="outline"
+                              title={`View ${t.full_name}'s routine`}
+                              aria-label={`View ${t.full_name}'s routine`}
+                              onClick={() => setRoutineTeacherId(t.id)}
+                              className="shrink-0"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          {expandedBusyId === t.id && (
+                            <div className="border-t border-red-100 px-3 pb-3 pt-2">
+                              <div className="space-y-1">
+                                {teacherDaySchedule(t.id).map((sch) => (
+                                  <div
+                                    key={sch.period}
+                                    className="flex items-center gap-2 text-xs text-slate-600"
+                                  >
+                                    <span className="w-6 font-semibold text-slate-700">
+                                      P{sch.period}
+                                    </span>
+                                    <span>
+                                      {sch.className}-{sch.sectionName}
+                                    </span>
+                                    {sch.isTag && (
+                                      <span className="rounded bg-teal-100 px-1 py-px text-[10px] font-medium text-teal-700">
+                                        tag
+                                      </span>
+                                    )}
+                                    <span className="text-slate-300">·</span>
+                                    <span>{sch.subjectName}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
-                          <span className="text-slate-400">
-                            {t.teacher_code}
-                          </span>
-                          {t.dayCount >= 5 && (
-                            <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
-                              already {t.dayCount} classes today
-                            </span>
-                          )}
-                          {t.stretch >= 3 && (
-                            <span className="rounded bg-orange-100 px-1.5 py-0.5 font-medium text-orange-700">
-                              {t.stretch} continuous
-                            </span>
-                          )}
-                          {sim.level === "yellow" && (
-                            <span className="text-amber-600">
-                              ⚠ {sim.reasons.join("; ")}
-                            </span>
-                          )}
-                          {sim.level === "red" && (
-                            <span className="text-red-600">
-                              ✖ {sim.reasons.join("; ")}
-                            </span>
-                          )}
-                        </div>
-                      </button>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="outline"
-                        title={`View ${t.full_name}'s routine`}
-                        aria-label={`View ${t.full_name}'s routine`}
-                        onClick={() => setRoutineTeacherId(t.id)}
-                        className="shrink-0"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
+                      ))}
                     </div>
-                  );
-                })
+                  )}
+                </>
               )}
             </div>
           </div>

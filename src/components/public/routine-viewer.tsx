@@ -44,8 +44,14 @@ export function RoutineViewer({
   const matrix = sectionId ? matrices[sectionId] : undefined;
 
   const downloadPdf = () => {
+    if (!sectionId) return;
     setPdfLoading(true);
-    window.open(`/api/routine.pdf?section=${sectionId}`, "_blank", "noopener");
+    const a = document.createElement("a");
+    a.href = `/api/routine.pdf?section=${sectionId}`;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     setTimeout(() => setPdfLoading(false), 2500);
   };
 
