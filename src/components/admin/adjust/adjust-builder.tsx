@@ -100,6 +100,17 @@ function toDateInput(d: Date) {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Fold a value for substring search: lowercase + collapse internal whitespace.
+ * Names are typed with inconsistent spacing in practice ("Md.  Rahim" vs
+ * "md rahim"), so an un-normalized `includes` misses rows a human considers
+ * identical. Codes and ids contain no spaces but go through the same path so
+ * one comparison helper serves every search box.
+ */
+function normalizeSearch(value: string | null | undefined) {
+  return (value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 interface DayCell {
   period: number;
   sectionId: string;
@@ -209,15 +220,6 @@ export function AdjustBuilder({
     [subjects],
   );
 
-  const subjectsByTeacher = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    for (const ts of teacherSubjects) {
-      if (!map.has(ts.teacher_id)) map.set(ts.teacher_id, new Set());
-      map.get(ts.teacher_id)!.add(ts.subject_id);
-    }
-    return map;
-  }, [teacherSubjects]);
-
   const adjustmentHistory = useMemo(() => {
     const groups = new Map<string, AdjustmentRow[]>();
     for (const adjustment of adjustments) {
@@ -290,7 +292,14 @@ export function AdjustBuilder({
       },
       roomLabel: (id) => rooms.find((item) => item.id === id)?.name ?? "—",
     });
-  }, [routineTeacherId, effectiveRoutines, sections, classes, subjectMap, rooms]);
+  }, [
+    routineTeacherId,
+    effectiveRoutines,
+    sections,
+    classes,
+    subjectMap,
+    rooms,
+  ]);
 
   const dayRoutines = useMemo(() => {
     if (!selectedTeacherId || dayIndex === null) return [];
@@ -306,25 +315,34 @@ export function AdjustBuilder({
       const primary = dayRoutines.find(
         (x) => x.period_number === p && !x.is_tag,
       );
-      if (!primary) continue;
-
       const tag = dayRoutines.find((x) => x.period_number === p && x.is_tag);
-      const subject = primary.subject_id
+
+      // A teacher can hold a TAG slot without owning the PRIMARY one (the slot
+      // belongs to another teacher; this one assists). Requiring `primary` here
+      // silently dropped those periods, so the rail badge — which counts
+      // primary AND tag — disagreed with the grid and hid a real class.
+      // Fall back to the tag row and blank out the primary-only fields.
+      const anchor = primary ?? tag;
+      if (!anchor) continue;
+
+      const subject = primary?.subject_id
         ? subjectMap.get(primary.subject_id)
         : undefined;
       const classRow = classes.find((c) => {
-        const s = sections.find((x) => x.id === primary.section_id);
+        const s = sections.find((x) => x.id === anchor.section_id);
         return s && c.id === s.class_id;
       });
-      const sectionRow = sections.find((x) => x.id === primary.section_id);
+      const sectionRow = sections.find((x) => x.id === anchor.section_id);
 
-      const existingPrimaryAdj = adjustments.find(
-        (a) =>
-          a.adjust_date === date &&
-          a.section_id === primary.section_id &&
-          a.period_number === p &&
-          !a.is_tag,
-      );
+      const existingPrimaryAdj = primary
+        ? adjustments.find(
+            (a) =>
+              a.adjust_date === date &&
+              a.section_id === primary.section_id &&
+              a.period_number === p &&
+              !a.is_tag,
+          )
+        : null;
 
       const existingTagAdj = tag
         ? adjustments.find(
@@ -336,13 +354,12 @@ export function AdjustBuilder({
           )
         : null;
 
-      const override = overrides[p];
+      const override = primary ? overrides[p] : undefined;
       const tagOv = tagOverrides[p];
 
       const effectiveTeacherId = override
         ? (override.newTeacherId ?? "")
         : (existingPrimaryAdj?.new_teacher_id ?? "");
-
       const tagEffectiveTeacherId = tagOv
         ? (tagOv.newTeacherId ?? "")
         : (existingTagAdj?.new_teacher_id ?? "");
@@ -356,12 +373,12 @@ export function AdjustBuilder({
 
       cells.push({
         period: p,
-        sectionId: primary.section_id,
-        subjectId: primary.subject_id,
+        sectionId: anchor.section_id,
+        subjectId: primary?.subject_id ?? null,
         subjectName: subject?.name ?? "—",
         className: classRow?.name ?? "—",
         sectionName: sectionRow?.name ?? "—",
-        baseTeacherId: primary.teacher_id ?? "",
+        baseTeacherId: primary?.teacher_id ?? "",
         effectiveTeacherId,
         isAdjusted: !!existingPrimaryAdj || !!override,
         isTag: !!tag,
@@ -388,12 +405,14 @@ export function AdjustBuilder({
   ]);
 
   const filteredTeachers = useMemo(() => {
-    if (!teacherSearch.trim()) return teachers;
-    const q = teacherSearch.toLowerCase();
+    const q = normalizeSearch(teacherSearch);
+    if (!q) return teachers;
     return teachers.filter(
       (t) =>
-        t.teacher_code.toLowerCase().includes(q) ||
-        t.id.toLowerCase().includes(q),
+        normalizeSearch(t.full_name).includes(q) ||
+        normalizeSearch(t.short_name).includes(q) ||
+        normalizeSearch(t.teacher_code).includes(q) ||
+        normalizeSearch(t.id).includes(q),
     );
   }, [teachers, teacherSearch]);
 
@@ -469,12 +488,28 @@ export function AdjustBuilder({
     if (sheetPeriod === null || dayIndex === null) return new Set<string>();
     const set = new Set<string>();
     for (const r of pendingRoutines) {
-      if (r.day === dayIndex && r.period_number === sheetPeriod && r.teacher_id) {
+      if (
+        r.day === dayIndex &&
+        r.period_number === sheetPeriod &&
+        r.teacher_id
+      ) {
         set.add(r.teacher_id);
       }
     }
     return set;
   }, [pendingRoutines, dayIndex, sheetPeriod]);
+
+  // Teacher ids that cover the currently selected subject, precomputed once so
+  // the per-teacher map below stays O(n). Open teachers always qualify, so a
+  // subject selection never hides the people most likely to be free.
+  const sheetSubjectTeacherIds = useMemo(() => {
+    if (!sheetSubjectFilter) return null;
+    const ids = new Set<string>();
+    for (const ts of teacherSubjects) {
+      if (ts.subject_id === sheetSubjectFilter) ids.add(ts.teacher_id);
+    }
+    return ids;
+  }, [teacherSubjects, sheetSubjectFilter]);
 
   const sheetTeacherRows = useMemo(() => {
     if (sheetPeriod === null || dayIndex === null) return [];
@@ -485,35 +520,46 @@ export function AdjustBuilder({
         stretch: stretchIndexed(pendingIndex, t.id, dayIndex),
         weekTotal: pendingIndex.weeklyTotal.get(t.id) ?? 0,
         busy: busyTeachersForPeriod.has(t.id),
+        subjectMatch:
+          !!sheetSubjectFilter &&
+          (t.is_open_teacher ||
+            t.primary_subject_id === sheetSubjectFilter ||
+            !!sheetSubjectTeacherIds?.has(t.id)),
       }))
       .sort(
         (a, b) =>
+          // Subject picks lead, then open teachers, then the lightest load.
+          // Everyone else still appears, just after them — an admin who needs
+          // a specific teacher must never be blocked by the subject filter.
+          // Array.prototype.sort is stable, so the search below keeps this order.
+          Number(b.subjectMatch) - Number(a.subjectMatch) ||
           Number(b.is_open_teacher) - Number(a.is_open_teacher) ||
           a.dayCount - b.dayCount ||
           a.weekTotal - b.weekTotal ||
           a.full_name.localeCompare(b.full_name),
       );
-  }, [teachers, pendingIndex, dayIndex, sheetPeriod, busyTeachersForPeriod]);
-
-  const subjectMatchedSheetTeachers = useMemo(() => {
-    if (!sheetSubjectFilter) return sheetTeacherRows;
-    return sheetTeacherRows.filter(
-      (t) =>
-        t.is_open_teacher ||
-        t.primary_subject_id === sheetSubjectFilter ||
-        subjectsByTeacher.get(t.id)?.has(sheetSubjectFilter),
-    );
-  }, [sheetTeacherRows, sheetSubjectFilter, subjectsByTeacher]);
+  }, [
+    teachers,
+    pendingIndex,
+    dayIndex,
+    sheetPeriod,
+    busyTeachersForPeriod,
+    sheetSubjectFilter,
+    sheetSubjectTeacherIds,
+  ]);
 
   const searchedSheetTeachers = useMemo(() => {
-    if (!sheetSearch.trim()) return subjectMatchedSheetTeachers;
-    const q = sheetSearch.toLowerCase();
-    return subjectMatchedSheetTeachers.filter(
+    const q = normalizeSearch(sheetSearch);
+    if (!q) return sheetTeacherRows;
+    // Searches the FULL list, not just subject matches, and matches on id as
+    // well as name/code so any teacher is reachable by typing.
+    return sheetTeacherRows.filter(
       (t) =>
-        t.full_name.toLowerCase().includes(q) ||
-        t.teacher_code.toLowerCase().includes(q),
+        normalizeSearch(t.full_name).includes(q) ||
+        normalizeSearch(t.teacher_code).includes(q) ||
+        normalizeSearch(t.id).includes(q),
     );
-  }, [subjectMatchedSheetTeachers, sheetSearch]);
+  }, [sheetTeacherRows, sheetSearch]);
 
   const freeSheetTeachers = useMemo(
     () => searchedSheetTeachers.filter((t) => !t.busy),
@@ -1078,7 +1124,7 @@ export function AdjustBuilder({
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
-                  placeholder="Search teachers..."
+                  placeholder="Search by name, code or ID..."
                   value={teacherSearch}
                   onChange={(e) => setTeacherSearch(e.target.value)}
                   className="pl-8"
@@ -1292,24 +1338,26 @@ export function AdjustBuilder({
                               </span>
                             </td>
                             <td className="border border-slate-200 px-3 py-2">
-                              {/* Primary */}
-                              <div>
-                                <span className="text-base font-medium text-slate-700">
-                                  {cell.subjectName}
-                                </span>
-                                <span className="ml-1 text-sm text-slate-500">
-                                  ·{" "}
-                                  {effectiveName ?? selectedTeacher.full_name}
-                                </span>
-                                {(hasOverride || cell.isAdjusted) && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="ml-1 text-xs"
-                                  >
-                                    Adj
-                                  </Badge>
-                                )}
-                              </div>
+                              {/* Primary session — hidden for tag-only periods */}
+                              {cell.baseTeacherId && (
+                                <div>
+                                  <span className="text-base font-medium text-slate-700">
+                                    {cell.subjectName}
+                                  </span>
+                                  <span className="ml-1 text-sm text-slate-500">
+                                    ·{" "}
+                                    {effectiveName ?? selectedTeacher.full_name}
+                                  </span>
+                                  {(hasOverride || cell.isAdjusted) && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="ml-1 text-xs"
+                                    >
+                                      Adj
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
                               {/* Tag row */}
                               {cell.isTag && (
                                 <div className="mt-1 border-t border-dashed border-teal-200 pt-1">
@@ -1362,17 +1410,22 @@ export function AdjustBuilder({
                             </td>
                             <td className="border border-slate-200 px-2 py-2 text-center">
                               <div className="flex flex-col gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() =>
-                                    handleCellClick(cell.period, "primary")
-                                  }
-                                  disabled={isPastDate || outOfRange}
-                                  className="h-8 text-sm"
-                                >
-                                  Change
-                                </Button>
+                                {/* Tag-only periods have no primary assignment
+                                    to replace, so Change is hidden and Tag is
+                                    the only action. */}
+                                {cell.baseTeacherId && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      handleCellClick(cell.period, "primary")
+                                    }
+                                    disabled={isPastDate || outOfRange}
+                                    className="h-8 text-sm"
+                                  >
+                                    Change
+                                  </Button>
+                                )}
                                 {cell.isTag && (
                                   <Button
                                     variant="ghost"
@@ -1631,7 +1684,7 @@ export function AdjustBuilder({
               <div className="relative min-w-0 flex-1">
                 <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
-                  placeholder="Search by name or code..."
+                  placeholder="Search by name, code or ID..."
                   value={sheetSearch}
                   onChange={(e) => setSheetSearch(e.target.value)}
                   className="pl-8"
@@ -1661,11 +1714,12 @@ export function AdjustBuilder({
 
             {sheetSubjectFilter && (
               <p className="mb-2 px-1 text-[11px] text-slate-400">
-                Showing teachers who teach{" "}
+                Teachers who teach{" "}
                 <strong className="text-slate-600">
                   {subjectMap.get(sheetSubjectFilter)?.name}
                 </strong>{" "}
-                (open teachers always qualify).
+                are listed first — everyone else follows. Search by name, code
+                or ID to find anyone.
               </p>
             )}
 
@@ -1689,13 +1743,13 @@ export function AdjustBuilder({
               {freeSheetTeachers.length === 0 &&
               busySheetTeachers.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">
-                  {sheetSubjectFilter
-                    ? "No teachers teach this subject (or match the search)."
+                  {sheetSearch.trim()
+                    ? "No teachers match this search."
                     : "No teachers available"}
                 </p>
               ) : (
                 <>
-                  {freeSheetTeachers.map((t) => {
+                  {freeSheetTeachers.map((t, i) => {
                     const sim = simulateTeacherAssignment(
                       pendingRoutines,
                       t.id,
@@ -1711,82 +1765,104 @@ export function AdjustBuilder({
                           ? "border-amber-300 bg-amber-50"
                           : "border-slate-200 bg-white";
 
+                    // Divider only at the subject -> non-subject boundary, so
+                    // the two groups read as one sorted list.
+                    const showOtherDivider =
+                      !!sheetSubjectFilter &&
+                      !t.subjectMatch &&
+                      freeSheetTeachers[i - 1]?.subjectMatch === true;
+
                     return (
-                      <div
-                        key={t.id}
-                        className={cn(
-                          "flex w-full items-start gap-2 rounded-lg border p-3 transition-colors hover:border-[#0d9488] hover:bg-[#0d9488]/5",
-                          levelColor,
+                      <div key={t.id} className="space-y-3">
+                        {showOtherDivider && (
+                          <div className="flex items-center gap-2 px-1 pt-1">
+                            <span className="h-px flex-1 bg-slate-200" />
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                              Other teachers
+                            </span>
+                            <span className="h-px flex-1 bg-slate-200" />
+                          </div>
                         )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() =>
-                            sheetTab === "tag"
-                              ? handleAssignTag(sheetPeriod!, t.id)
-                              : handleAssignPrimary(sheetPeriod!, t.id)
-                          }
-                          className="min-w-0 flex-1 text-left"
+                        <div
+                          className={cn(
+                            "flex w-full items-start gap-2 rounded-lg border p-3 transition-colors hover:border-[#0d9488] hover:bg-[#0d9488]/5",
+                            levelColor,
+                          )}
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="flex items-center gap-1.5 font-medium text-slate-800">
-                              {t.full_name}
-                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                                free
+                          <button
+                            type="button"
+                            onClick={() =>
+                              sheetTab === "tag"
+                                ? handleAssignTag(sheetPeriod!, t.id)
+                                : handleAssignPrimary(sheetPeriod!, t.id)
+                            }
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="flex items-center gap-1.5 font-medium text-slate-800">
+                                {t.full_name}
+                                <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                                  free
+                                </span>
+                                {t.subjectMatch && (
+                                  <span className="rounded bg-[#0d9488]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#0b7a70]">
+                                    Subject
+                                  </span>
+                                )}
                               </span>
-                            </span>
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                              <span>{t.dayCount}P day</span>
-                              <span>·</span>
-                              <span>
-                                {t.stretch >= 3 ? `${t.stretch} cont` : "—"}
-                              </span>
-                              <span>·</span>
-                              <span>{t.weekTotal}P wk</span>
+                              <div className="flex items-center gap-2 text-xs text-slate-500">
+                                <span>{t.dayCount}P day</span>
+                                <span>·</span>
+                                <span>
+                                  {t.stretch >= 3 ? `${t.stretch} cont` : "—"}
+                                </span>
+                                <span>·</span>
+                                <span>{t.weekTotal}P wk</span>
+                              </div>
                             </div>
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
-                            <span className="text-slate-400">
-                              {t.teacher_code}
-                            </span>
-                            {t.dayCount >= 5 && (
-                              <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">
-                                already {t.dayCount} classes today
+                            <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                              <span className="text-slate-400">
+                                {t.teacher_code}
                               </span>
-                            )}
-                            {t.dayCount === 4 && (
-                              <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
-                                already {t.dayCount} classes today
-                              </span>
-                            )}
-                            {t.stretch >= 3 && (
-                              <span className="rounded bg-orange-100 px-1.5 py-0.5 font-medium text-orange-700">
-                                {t.stretch} continuous
-                              </span>
-                            )}
-                            {sim.level === "yellow" && (
-                              <span className="text-amber-600">
-                                ⚠ {sim.reasons.join("; ")}
-                              </span>
-                            )}
-                            {sim.level === "red" && (
-                              <span className="text-red-600">
-                                ✖ {sim.reasons.join("; ")}
-                              </span>
-                            )}
-                          </div>
-                        </button>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="outline"
-                          title={`View ${t.full_name}'s routine`}
-                          aria-label={`View ${t.full_name}'s routine`}
-                          onClick={() => setRoutineTeacherId(t.id)}
-                          className="shrink-0"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
+                              {t.dayCount >= 5 && (
+                                <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">
+                                  already {t.dayCount} classes today
+                                </span>
+                              )}
+                              {t.dayCount === 4 && (
+                                <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700">
+                                  already {t.dayCount} classes today
+                                </span>
+                              )}
+                              {t.stretch >= 3 && (
+                                <span className="rounded bg-orange-100 px-1.5 py-0.5 font-medium text-orange-700">
+                                  {t.stretch} continuous
+                                </span>
+                              )}
+                              {sim.level === "yellow" && (
+                                <span className="text-amber-600">
+                                  ⚠ {sim.reasons.join("; ")}
+                                </span>
+                              )}
+                              {sim.level === "red" && (
+                                <span className="text-red-600">
+                                  ✖ {sim.reasons.join("; ")}
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="outline"
+                            title={`View ${t.full_name}'s routine`}
+                            aria-label={`View ${t.full_name}'s routine`}
+                            onClick={() => setRoutineTeacherId(t.id)}
+                            className="shrink-0"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
@@ -1796,94 +1872,116 @@ export function AdjustBuilder({
                       <p className="px-1 pt-1 font-semibold uppercase tracking-wide text-[10px] text-red-500">
                         Busy in P{sheetPeriod} — tap to see their day
                       </p>
-                      {busySheetTeachers.map((t) => (
-                        <div
-                          key={t.id}
-                          className="rounded-lg border border-red-200 bg-red-50/50"
-                        >
-                          <div className="flex w-full items-start gap-2 p-3">
-                            <button
-                              type="button"
-                              disabled
-                              className="min-w-0 flex-1 cursor-not-allowed text-left opacity-70"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="flex items-center gap-1.5 font-medium text-slate-800">
-                                  {t.full_name}
-                                  <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
-                                    busy
-                                  </span>
+                      {busySheetTeachers.map((t, i) => {
+                        const showOtherDivider =
+                          !!sheetSubjectFilter &&
+                          !t.subjectMatch &&
+                          busySheetTeachers[i - 1]?.subjectMatch === true;
+
+                        return (
+                          <div key={t.id} className="space-y-2">
+                            {showOtherDivider && (
+                              <div className="flex items-center gap-2 px-1 pt-1">
+                                <span className="h-px flex-1 bg-red-200" />
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                  Other teachers
                                 </span>
-                                <div className="flex items-center gap-2 text-xs text-slate-500">
-                                  <span>{t.dayCount}P day</span>
-                                  <span>·</span>
-                                  <span>{t.weekTotal}P wk</span>
-                                </div>
+                                <span className="h-px flex-1 bg-red-200" />
                               </div>
-                              <div className="mt-1 text-xs text-red-600">
-                                {t.teacher_code}
-                              </div>
-                            </button>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              title="See this teacher's class routine"
-                              aria-label="See this teacher's class routine"
-                              onClick={() =>
-                                setExpandedBusyId(
-                                  expandedBusyId === t.id ? null : t.id,
-                                )
-                              }
-                              className="shrink-0"
-                            >
-                              <ChevronDown
-                                className={cn(
-                                  "h-4 w-4 transition-transform",
-                                  expandedBusyId === t.id && "rotate-180",
-                                )}
-                              />
-                            </Button>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="outline"
-                              title={`View ${t.full_name}'s routine`}
-                              aria-label={`View ${t.full_name}'s routine`}
-                              onClick={() => setRoutineTeacherId(t.id)}
-                              className="shrink-0"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          {expandedBusyId === t.id && (
-                            <div className="border-t border-red-100 px-3 pb-3 pt-2">
-                              <div className="space-y-1">
-                                {teacherDaySchedule(t.id).map((sch) => (
-                                  <div
-                                    key={sch.period}
-                                    className="flex items-center gap-2 text-xs text-slate-600"
-                                  >
-                                    <span className="w-6 font-semibold text-slate-700">
-                                      P{sch.period}
-                                    </span>
-                                    <span>
-                                      {sch.className}-{sch.sectionName}
-                                    </span>
-                                    {sch.isTag && (
-                                      <span className="rounded bg-teal-100 px-1 py-px text-[10px] font-medium text-teal-700">
-                                        tag
+                            )}
+                            <div className="rounded-lg border border-red-200 bg-red-50/50">
+                              <div className="flex w-full items-start gap-2 p-3">
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="min-w-0 flex-1 cursor-not-allowed text-left opacity-70"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="flex items-center gap-1.5 font-medium text-slate-800">
+                                      {t.full_name}
+                                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+                                        busy
                                       </span>
-                                    )}
-                                    <span className="text-slate-300">·</span>
-                                    <span>{sch.subjectName}</span>
+                                      {t.subjectMatch && (
+                                        <span className="rounded bg-[#0d9488]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#0b7a70]">
+                                          Subject
+                                        </span>
+                                      )}
+                                    </span>
+                                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                                      <span>{t.dayCount}P day</span>
+                                      <span>·</span>
+                                      <span>{t.weekTotal}P wk</span>
+                                    </div>
                                   </div>
-                                ))}
+                                  <div className="mt-1 text-xs text-red-600">
+                                    {t.teacher_code}
+                                  </div>
+                                </button>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  title="See this teacher's class routine"
+                                  aria-label="See this teacher's class routine"
+                                  onClick={() =>
+                                    setExpandedBusyId(
+                                      expandedBusyId === t.id ? null : t.id,
+                                    )
+                                  }
+                                  className="shrink-0"
+                                >
+                                  <ChevronDown
+                                    className={cn(
+                                      "h-4 w-4 transition-transform",
+                                      expandedBusyId === t.id && "rotate-180",
+                                    )}
+                                  />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="outline"
+                                  title={`View ${t.full_name}'s routine`}
+                                  aria-label={`View ${t.full_name}'s routine`}
+                                  onClick={() => setRoutineTeacherId(t.id)}
+                                  className="shrink-0"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
                               </div>
+                              {expandedBusyId === t.id && (
+                                <div className="border-t border-red-100 px-3 pb-3 pt-2">
+                                  <div className="space-y-1">
+                                    {teacherDaySchedule(t.id).map((sch) => (
+                                      <div
+                                        key={sch.period}
+                                        className="flex items-center gap-2 text-xs text-slate-600"
+                                      >
+                                        <span className="w-6 font-semibold text-slate-700">
+                                          P{sch.period}
+                                        </span>
+                                        <span>
+                                          {sch.className}-{sch.sectionName}
+                                        </span>
+                                        {sch.isTag && (
+                                          <span className="rounded bg-teal-100 px-1 py-px text-[10px] font-medium text-teal-700">
+                                            tag
+                                          </span>
+                                        )}
+                                        <span className="text-slate-300">
+                                          ·
+                                        </span>
+                                        <span>{sch.subjectName}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      ))}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </>
