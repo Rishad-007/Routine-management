@@ -54,7 +54,9 @@ import { getSchoolDayIndex, getTodayLocal } from "@/lib/periods";
 import { buildTeacherRoutinePreview } from "@/lib/teacher-routine-preview";
 import {
   applyAdjustmentsToRoutines,
+  applyWeekAdjustmentsToRoutines,
   buildRoutineIndex,
+  isCoveringIndexed,
   dayCountIndexed,
   isBusyIndexed,
   simulateTeacherAssignment,
@@ -66,6 +68,7 @@ import {
   type ClassPeriodRule,
 } from "@/lib/class-period-rules";
 import {
+  removeAdjustment,
   saveAllAdjustments,
   type PeriodAdjustment,
 } from "@/app/admin/adjust/actions";
@@ -118,16 +121,34 @@ interface DayCell {
   subjectName: string;
   className: string;
   sectionName: string;
+  /** Teacher from the BASE weekly routine, i.e. the genuine original. */
   baseTeacherId: string;
+  /** Teacher actually teaching now (pending override, else saved adjustment). */
   effectiveTeacherId: string;
   isAdjusted: boolean;
+  /** A saved adjustment exists for this primary slot (not just a local one). */
+  hasSavedAdjustment: boolean;
+  /**
+   * This period was substituted away from the selected teacher, so it no longer
+   * appears in their effective routine. The row is kept purely so the saved
+   * adjustment stays visible and revertible from their own grid — without it
+   * Revert is only reachable from the substitute's grid.
+   */
+  isDetached: boolean;
   isTag: boolean;
   tagSubjectId: string | null;
+  /** Original tag teacher from the BASE routine. */
   tagTeacherId: string | null;
   tagRoomId: string | null;
   tagSubjectName: string;
   tagEffectiveTeacherId: string;
   isTagAdjusted: boolean;
+  /** A saved adjustment exists for this tag slot. */
+  hasSavedTagAdjustment: boolean;
+  originalSubjectId: string | null;
+  originalRoomId: string | null;
+  tagOriginalSubjectId: string | null;
+  tagOriginalRoomId: string | null;
 }
 
 interface TagOverride {
@@ -183,6 +204,13 @@ export function AdjustBuilder({
     detail: string;
   } | null>(null);
   const [routineTeacherId, setRoutineTeacherId] = useState<string | null>(null);
+  // Period awaiting a destructive clear, confirmed in the dialog below.
+  const [pendingRevert, setPendingRevert] = useState<{
+    period: number;
+    isTag: boolean;
+    label: string;
+  } | null>(null);
+  const [reverting, setReverting] = useState(false);
 
   const dayIndex = useMemo(
     () => getSchoolDayIndex(new Date(date + "T00:00:00")),
@@ -273,11 +301,22 @@ export function AdjustBuilder({
     [teachers, routineTeacherId],
   );
 
+  // Live class showing: the candidate's weekly preview must include any cover
+  // they picked up this week, otherwise the eye dialog disagrees with the
+  // free/busy split sitting right next to it. Deliberately built from the raw
+  // `routines` prop rather than `effectiveRoutines` (which is scoped to the
+  // single picked date) so all five weekdays are covered.
+  const previewRoutines = useMemo(
+    () =>
+      applyWeekAdjustmentsToRoutines(routines, adjustments, new Date()),
+    [routines, adjustments],
+  );
+
   const routinePreview = useMemo(() => {
     if (!routineTeacherId) return null;
 
     return buildTeacherRoutinePreview({
-      routines: effectiveRoutines,
+      routines: previewRoutines,
       teacherId: routineTeacherId,
       subjectLabel: (id) => {
         const subject = subjectMap.get(id);
@@ -291,14 +330,17 @@ export function AdjustBuilder({
         return section && classRow ? `${classRow.name}-${section.name}` : "—";
       },
       roomLabel: (id) => rooms.find((item) => item.id === id)?.name ?? "—",
+      teacherLabel: (id) =>
+        teachers.find((item) => item.id === id)?.full_name ?? "",
     });
   }, [
     routineTeacherId,
-    effectiveRoutines,
+    previewRoutines,
     sections,
     classes,
     subjectMap,
     rooms,
+    teachers,
   ]);
 
   const dayRoutines = useMemo(() => {
@@ -307,6 +349,20 @@ export function AdjustBuilder({
       (r) => r.teacher_id === selectedTeacherId && r.day === dayIndex,
     );
   }, [effectiveRoutines, selectedTeacherId, dayIndex]);
+
+  // The weekly BASE rows for the selected weekday, with no teacher filter and
+  // no adjustment overlay.
+  //
+  // `dayRoutines` cannot be used to recover the original teacher: after a
+  // substitution its `teacher_id` has already been overwritten with the
+  // substitute, so reading `primary.teacher_id` back out returned the
+  // substitute and `original_teacher_id` was rewritten on every subsequent
+  // edit (A -> B, then B -> A recorded "original = B"). The base row is the
+  // only trustworthy source for what the period was before any adjustment.
+  const baseDayRoutines = useMemo(() => {
+    if (dayIndex === null) return [];
+    return routines.filter((r) => r.day === dayIndex);
+  }, [routines, dayIndex]);
 
   const dayCells: DayCell[] = useMemo(() => {
     if (!selectedTeacherId || dayIndex === null) return [];
@@ -322,8 +378,23 @@ export function AdjustBuilder({
       // silently dropped those periods, so the rail badge — which counts
       // primary AND tag — disagreed with the grid and hid a real class.
       // Fall back to the tag row and blank out the primary-only fields.
-      const anchor = primary ?? tag;
+      //
+      // The above is only true while they *still* hold the period. If an
+      // adjustment has substituted them away, `dayRoutines` (filtered by
+      // current effective teacher) returns nothing, so we also look in the base
+      // (unadjusted) routine: ownBasePrimary / ownBaseTag prove they were the
+      // original holder and let us display a "substituted away" row, so Revert
+      // remains reachable from the same teacher's grid.
+      const ownBasePrimary = baseDayRoutines.find(
+        (x) => x.period_number === p && !x.is_tag && x.teacher_id === selectedTeacherId,
+      );
+      const ownBaseTag = baseDayRoutines.find(
+        (x) => x.period_number === p && x.is_tag && x.teacher_id === selectedTeacherId,
+      );
+
+      const anchor = primary ?? tag ?? ownBasePrimary ?? ownBaseTag;
       if (!anchor) continue;
+      const isDetached = !primary && !tag;
 
       const subject = primary?.subject_id
         ? subjectMap.get(primary.subject_id)
@@ -334,28 +405,53 @@ export function AdjustBuilder({
       });
       const sectionRow = sections.find((x) => x.id === anchor.section_id);
 
-      const existingPrimaryAdj = primary
-        ? adjustments.find(
-            (a) =>
-              a.adjust_date === date &&
-              a.section_id === primary.section_id &&
-              a.period_number === p &&
-              !a.is_tag,
-          )
-        : null;
-
-      const existingTagAdj = tag
-        ? adjustments.find(
-            (a) =>
-              a.adjust_date === date &&
-              a.section_id === tag.section_id &&
-              a.period_number === p &&
-              a.is_tag,
-          )
-        : null;
+      // `ownBase*` is already filtered to this teacher's own base rows, so using
+      // it as the fallback is safe for tag-only teachers too: they never owned
+      // the primary, so `ownBasePrimary` is undefined and nothing leaks across.
+      const existingPrimaryAdj = adjustments.find(
+        (a) =>
+          a.adjust_date === date &&
+          a.section_id ===
+            (primary?.section_id ?? ownBasePrimary?.section_id ?? "") &&
+          a.period_number === p &&
+          !a.is_tag,
+      );
+      const existingTagAdj = adjustments.find(
+        (a) =>
+          a.adjust_date === date &&
+          a.section_id ===
+            (tag?.section_id ?? ownBaseTag?.section_id ?? "") &&
+          a.period_number === p &&
+          a.is_tag,
+      );
 
       const override = primary ? overrides[p] : undefined;
       const tagOv = tagOverrides[p];
+
+      // Original (pre-adjustment) values come from the base weekly rows, keyed
+      // by section+period+role rather than by teacher. After a substitution the
+      // selected teacher may not own the slot at all, so `dayRoutines` can only
+      // describe who is teaching NOW — never who taught before.
+      const basePrimary =
+        primary || ownBasePrimary
+          ? baseDayRoutines.find(
+              (x) =>
+                x.section_id ===
+                  (primary?.section_id ?? ownBasePrimary?.section_id) &&
+                x.period_number === p &&
+                !x.is_tag,
+            )
+          : undefined;
+      const baseTag =
+        tag || ownBaseTag
+          ? baseDayRoutines.find(
+              (x) =>
+                x.section_id ===
+                  (tag?.section_id ?? ownBaseTag?.section_id) &&
+                x.period_number === p &&
+                x.is_tag,
+            )
+          : undefined;
 
       const effectiveTeacherId = override
         ? (override.newTeacherId ?? "")
@@ -363,36 +459,61 @@ export function AdjustBuilder({
       const tagEffectiveTeacherId = tagOv
         ? (tagOv.newTeacherId ?? "")
         : (existingTagAdj?.new_teacher_id ?? "");
+      // A substituted-away row has no `tag` to read a subject from, so fall
+      // back to the base row's subject — otherwise the tag line renders as "—".
+      const tagBaseSubjectId = tag?.subject_id ?? baseTag?.subject_id;
       const tagEffectiveSubjectName = tagOv?.newSubjectId
         ? subjectMap.get(tagOv.newSubjectId)?.name
         : existingTagAdj?.new_subject_id
           ? subjectMap.get(existingTagAdj.new_subject_id)?.name
-          : tag?.subject_id
-            ? subjectMap.get(tag.subject_id)?.name
+          : tagBaseSubjectId
+            ? subjectMap.get(tagBaseSubjectId)?.name
             : undefined;
 
       cells.push({
         period: p,
         sectionId: anchor.section_id,
-        subjectId: primary?.subject_id ?? null,
-        subjectName: subject?.name ?? "—",
+        // A substituted-away row has no effective `primary`, and `subject` above
+        // is derived from `primary` only, so read the subject from the base row
+        // instead — otherwise the row renders "—" on exactly the rows that most
+        // need to stay legible. `basePrimary` stays undefined for a teacher who
+        // only ever holds a tag, which keeps the primary block hidden for them.
+        subjectId: primary?.subject_id ?? basePrimary?.subject_id ?? null,
+        subjectName:
+          subject?.name ??
+          (basePrimary?.subject_id
+            ? (subjectMap.get(basePrimary.subject_id)?.name ?? "—")
+            : "—"),
         className: classRow?.name ?? "—",
         sectionName: sectionRow?.name ?? "—",
-        baseTeacherId: primary?.teacher_id ?? "",
+        baseTeacherId: basePrimary?.teacher_id ?? "",
         effectiveTeacherId,
         isAdjusted: !!existingPrimaryAdj || !!override,
-        isTag: !!tag,
-        tagSubjectId: tag?.subject_id ?? null,
-        tagTeacherId: tag?.teacher_id ?? null,
-        tagRoomId: tag?.room_id ?? null,
+        // Set when a SAVED adjustment exists (as opposed to a pending local
+        // override) — that is what the Revert / Remove actions act on.
+        hasSavedAdjustment: !!existingPrimaryAdj,
+        isDetached,
+        // `baseTag` is defined only when this teacher owns or holds the tag
+        // session, so a teacher with no tag involvement never gains a tag line
+        // or a spurious "Revert tag".
+        isTag: !!baseTag,
+        tagSubjectId: tag?.subject_id ?? baseTag?.subject_id ?? null,
+        tagTeacherId: baseTag?.teacher_id ?? null,
+        tagRoomId: baseTag?.room_id ?? null,
         tagSubjectName: tagEffectiveSubjectName ?? "—",
-        tagEffectiveTeacherId: tagEffectiveTeacherId || (tag?.teacher_id ?? ""),
+        tagEffectiveTeacherId: tagEffectiveTeacherId || tag?.teacher_id || "",
         isTagAdjusted: !!existingTagAdj || !!tagOv,
+        hasSavedTagAdjustment: !!existingTagAdj,
+        originalSubjectId: basePrimary?.subject_id ?? null,
+        originalRoomId: basePrimary?.room_id ?? null,
+        tagOriginalSubjectId: baseTag?.subject_id ?? null,
+        tagOriginalRoomId: baseTag?.room_id ?? null,
       });
     }
     return cells;
   }, [
     dayRoutines,
+    baseDayRoutines,
     selectedTeacherId,
     dayIndex,
     subjectMap,
@@ -511,6 +632,10 @@ export function AdjustBuilder({
     return ids;
   }, [teacherSubjects, sheetSubjectFilter]);
 
+  const currentSheetCell = sheetPeriod
+    ? dayCells.find((c) => c.period === sheetPeriod)
+    : null;
+
   const sheetTeacherRows = useMemo(() => {
     if (sheetPeriod === null || dayIndex === null) return [];
     return teachers
@@ -520,6 +645,15 @@ export function AdjustBuilder({
         stretch: stretchIndexed(pendingIndex, t.id, dayIndex),
         weekTotal: pendingIndex.weeklyTotal.get(t.id) ?? 0,
         busy: busyTeachersForPeriod.has(t.id),
+        // True when this teacher holds the cell only because of a saved
+        // substitution, so the sheet can separate a genuine weekly class from
+        // a one-week cover.
+        isCovering: isCoveringIndexed(pendingIndex, t.id, dayIndex, sheetPeriod),
+        // The substitute currently recorded for this slot, so an admin editing
+        // an existing adjustment can see who it already is.
+        isCurrentHolder: sheetTab === "primary"
+          ? t.id === currentSheetCell?.effectiveTeacherId
+          : t.id === currentSheetCell?.tagEffectiveTeacherId,
         subjectMatch:
           !!sheetSubjectFilter &&
           (t.is_open_teacher ||
@@ -543,6 +677,8 @@ export function AdjustBuilder({
     pendingIndex,
     dayIndex,
     sheetPeriod,
+    sheetTab,
+    currentSheetCell,
     busyTeachersForPeriod,
     sheetSubjectFilter,
     sheetSubjectTeacherIds,
@@ -808,6 +944,57 @@ export function AdjustBuilder({
     setTagOverrides({});
   };
 
+  /**
+   * Clear a SAVED adjustment for one period.
+   *
+   * Previously the only way back was to re-pick the original teacher and save
+   * again, and `resetCell` merely deleted local state — after a successful save
+   * there was no control at all that reached the database. Revert and Remove
+   * share this one path: deleting the adjustment row restores the base weekly
+   * routine, which is what "revert" means.
+   */
+  const confirmRevert = async () => {
+    if (!pendingRevert || !selectedTeacherId) return;
+    const cell = dayCells.find((c) => c.period === pendingRevert.period);
+    if (!cell) return;
+
+    setReverting(true);
+    const res = await removeAdjustment(date, cell.sectionId, [
+      { period: pendingRevert.period, isTag: pendingRevert.isTag },
+    ]);
+    setReverting(false);
+
+    if (res.error) {
+      toast.error(res.error);
+      return;
+    }
+
+    // Drop any stale local edit for this period so the grid cannot show a
+    // pending override that the database no longer has.
+    if (pendingRevert.isTag) {
+      setTagOverrides((prev) => {
+        const next = { ...prev };
+        delete next[pendingRevert.period];
+        return next;
+      });
+    } else {
+      setOverrides((prev) => {
+        const next = { ...prev };
+        delete next[pendingRevert.period];
+        return next;
+      });
+    }
+
+    toast.success(
+      (res.removed ?? 0) > 0
+        ? `Adjustment cleared for period ${pendingRevert.period}.`
+        : "Nothing to clear — that period had no saved adjustment.",
+    );
+    setPendingRevert(null);
+    setSheetOpen(false);
+    router.refresh();
+  };
+
   const handleSave = async (force = false) => {
     if (!selectedTeacherId || dayIndex === null) {
       toast.error("Select a teacher and a school day first.");
@@ -825,11 +1012,11 @@ export function AdjustBuilder({
         period: Number(period),
         sectionId: o.sectionId,
         isTag: false,
-        originalTeacherId: cell.baseTeacherId,
+        originalTeacherId: cell.baseTeacherId || null,
         newTeacherId: o.newTeacherId,
-        originalSubjectId: null,
+        originalSubjectId: cell.originalSubjectId,
         newSubjectId: null,
-        originalRoomId: null,
+        originalRoomId: cell.originalRoomId,
         newRoomId: null,
         reason: o.reason || null,
         level: "ok",
@@ -846,9 +1033,9 @@ export function AdjustBuilder({
         isTag: true,
         originalTeacherId: cell.tagTeacherId,
         newTeacherId: to.newTeacherId,
-        originalSubjectId: cell.tagSubjectId,
+        originalSubjectId: cell.tagOriginalSubjectId,
         newSubjectId: to.newSubjectId,
-        originalRoomId: cell.tagRoomId,
+        originalRoomId: cell.tagOriginalRoomId,
         newRoomId: to.newRoomId,
         reason: null,
         level: "ok",
@@ -915,12 +1102,11 @@ export function AdjustBuilder({
     setTimeout(() => setReportLoading(false), 2500);
   };
 
-  const currentSheetCell = sheetPeriod
-    ? dayCells.find((c) => c.period === sheetPeriod)
-    : null;
-
   const currentTagOverride = sheetPeriod
     ? tagOverrides[sheetPeriod]
+    : undefined;
+  const currentPrimaryOverride = sheetPeriod
+    ? overrides[sheetPeriod]
     : undefined;
 
   return (
@@ -1307,12 +1493,30 @@ export function AdjustBuilder({
                           ? subjectMap.get(tagOv.newSubjectId)?.name
                           : cell.tagSubjectName;
 
+                        // Who each slot would return to if the saved
+                        // adjustment is cleared. These come from the BASE
+                        // routine, so they stay correct no matter how many
+                        // times the period has been re-adjusted.
+                        const originalTeacherName = cell.baseTeacherId
+                          ? teachers.find((t) => t.id === cell.baseTeacherId)
+                              ?.full_name
+                          : null;
+                        const originalTagTeacherName = cell.tagTeacherId
+                          ? teachers.find((t) => t.id === cell.tagTeacherId)
+                              ?.full_name
+                          : null;
+
                         return (
                           <tr
                             key={cell.period}
                             className={cn(
                               "transition-colors",
-                              (hasOverride || hasTagOverride) && "bg-amber-50",
+                              (hasOverride ||
+                                hasTagOverride ||
+                                cell.isDetached ||
+                                cell.hasSavedAdjustment ||
+                                cell.hasSavedTagAdjustment) &&
+                                "bg-amber-50",
                             )}
                           >
                             <td className="border border-slate-200 px-2 py-2 text-center text-sm font-bold text-slate-600">
@@ -1439,6 +1643,64 @@ export function AdjustBuilder({
                                     Tag
                                   </Button>
                                 )}
+
+                                {/* Saved adjustments need a way back. Shown
+                                    only when the change is in the database and
+                                    no pending local edit is masking it. */}
+                                {!isPastDate && cell.hasSavedAdjustment && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() =>
+                                      setPendingRevert({
+                                        period: cell.period,
+                                        isTag: false,
+                                        label: cell.isDetached
+                                          ? `Return period ${cell.period} to you`
+                                          : originalTeacherName
+                                            ? `Restore ${originalTeacherName} to period ${cell.period}`
+                                            : `Remove the adjustment on period ${cell.period}`,
+                                      })
+                                    }
+                                    disabled={outOfRange || reverting}
+                                  className="h-8 border-amber-300 text-xs text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                                >
+                                    {cell.isDetached ? "Revert to mine" : "Revert"}
+                                  </Button>
+                                )}
+                                {/* Detached row: a saved adjustment moved this
+                                    period off this teacher. They still need to
+                                    see it and be able to undo it — before this,
+                                    the row vanished from their grid entirely
+                                    (dayRoutines filters by current effective
+                                    teacher) and Revert was only reachable from
+                                    the substitute's grid. */}
+                                {!isPastDate && cell.isDetached && cell.hasSavedAdjustment && (
+                                  <p className="px-1 text-[10px] leading-tight text-slate-500">
+                                    Substituted away from you
+                                    {effectiveName ? ` to ${effectiveName}` : ""}.
+                                    Revert returns this period to you.
+                                  </p>
+                                )}
+                                {!isPastDate && cell.hasSavedTagAdjustment && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() =>
+                                      setPendingRevert({
+                                        period: cell.period,
+                                        isTag: true,
+                                        label: originalTagTeacherName
+                                          ? `Restore ${originalTagTeacherName} to the tag session in period ${cell.period}`
+                                          : `Remove the tag adjustment on period ${cell.period}`,
+                                      })
+                                    }
+                                    disabled={outOfRange || reverting}
+                                    className="h-8 border-amber-300 text-xs text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                                  >
+                                    Revert tag
+                                  </Button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1523,6 +1785,11 @@ export function AdjustBuilder({
                                   isContinuous && "bg-amber-50",
                                   (cell?.continuous ?? 0) >= 3 &&
                                     "bg-orange-100",
+                                  // Cover cells get a dashed teal edge so a
+                                  // one-week stand-in never reads as part of
+                                  // this teacher's permanent week.
+                                  cell?.isAdjusted &&
+                                    "border-2 border-dashed border-teal-400",
                                 )}
                               >
                                 {cell ? (
@@ -1537,6 +1804,17 @@ export function AdjustBuilder({
                                     <p className="text-xs text-slate-400">
                                       {cell.room}
                                     </p>
+                                    {cell.isAdjusted && (
+                                      <Badge
+                                        className="bg-teal-100 px-1 py-0 text-[9px] text-teal-800"
+                                        title={cell.coveringFor}
+                                      >
+                                        Cover
+                                        {cell.originalTeacherName
+                                          ? ` for ${cell.originalTeacherName}`
+                                          : ""}
+                                      </Badge>
+                                    )}
                                     {isContinuous && (
                                       <Badge className="bg-amber-200 px-1 py-0 text-[9px] text-amber-900">
                                         {cell.continuous} continuous
@@ -1804,6 +2082,14 @@ export function AdjustBuilder({
                                 <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
                                   free
                                 </span>
+                                {/* Already the recorded substitute for this
+                                    slot: selecting them is a no-op edit, so say
+                                    so instead of letting it look like a change. */}
+                                {t.isCurrentHolder && (
+                                  <span className="rounded bg-[#1e3a5f] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                    Current
+                                  </span>
+                                )}
                                 {t.subjectMatch && (
                                   <span className="rounded bg-[#0d9488]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#0b7a70]">
                                     Subject
@@ -1902,6 +2188,23 @@ export function AdjustBuilder({
                                       <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
                                         busy
                                       </span>
+                                      {/* Busy only because they are covering
+                                          someone else this week — a real
+                                          opportunity once that cover is
+                                          removed, not a permanent clash. */}
+                                      {t.isCovering && (
+                                        <span
+                                          className="rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-medium text-teal-700"
+                                          title="Holding this period only as a temporary cover"
+                                        >
+                                          covering
+                                        </span>
+                                      )}
+                                      {t.isCurrentHolder && (
+                                        <span className="rounded bg-[#1e3a5f] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                          Current
+                                        </span>
+                                      )}
                                       {t.subjectMatch && (
                                         <span className="rounded bg-[#0d9488]/10 px-1.5 py-0.5 text-[10px] font-medium text-[#0b7a70]">
                                           Subject
@@ -2002,7 +2305,49 @@ export function AdjustBuilder({
                   className="w-full"
                 >
                   <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                  Reset to original
+                  Discard unsaved change
+                </Button>
+              </div>
+            )}
+
+          {/* A SAVED adjustment with no pending local edit: this is the only
+              control inside the sheet that clears it from the database. */}
+          {sheetPeriod !== null &&
+            !isPastDate &&
+            !currentPrimaryOverride &&
+            !currentTagOverride &&
+            ((sheetTab === "primary" && currentSheetCell?.hasSavedAdjustment) ||
+              (sheetTab === "tag" &&
+                currentSheetCell?.hasSavedTagAdjustment)) && (
+              <div className="px-4 pt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const isTag = sheetTab === "tag";
+                    const name = isTag
+                      ? currentSheetCell?.tagTeacherId
+                        ? teachers.find(
+                            (t) => t.id === currentSheetCell.tagTeacherId,
+                          )?.full_name
+                        : null
+                      : currentSheetCell?.baseTeacherId
+                        ? teachers.find(
+                            (t) => t.id === currentSheetCell.baseTeacherId,
+                          )?.full_name
+                        : null;
+                    setPendingRevert({
+                      period: sheetPeriod,
+                      isTag,
+                      label: name
+                        ? `Restore ${name} to ${isTag ? "the tag session in " : ""}period ${sheetPeriod}`
+                        : `Remove the ${isTag ? "tag " : ""}adjustment on period ${sheetPeriod}`,
+                    });
+                  }}
+                  className="w-full border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                >
+                  <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                  Remove adjustment
                 </Button>
               </div>
             )}
@@ -2034,6 +2379,38 @@ export function AdjustBuilder({
               className="bg-red-600 text-white hover:bg-red-700"
             >
               Save anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Clear a saved adjustment */}
+      <AlertDialog
+        open={!!pendingRevert}
+        onOpenChange={(open) => {
+          if (!open && !reverting) setPendingRevert(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-amber-700">
+              <RotateCcw className="h-5 w-5" />
+              Clear this adjustment?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRevert?.label}. The period reverts to the teacher from the
+              weekly base routine, and any substitute saved for it is removed.
+              Other periods on this day are untouched.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reverting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmRevert}
+              disabled={reverting}
+              className="bg-amber-600 text-white hover:bg-amber-700"
+            >
+              {reverting ? "Clearing…" : "Clear adjustment"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

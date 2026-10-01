@@ -64,6 +64,47 @@ async function periodRuleError(
 }
 
 /**
+ * Turn raw Postgres / trigger text into something an admin can act on.
+ *
+ * The adjustment triggers raise plain exceptions and PostgREST surfaces unique
+ * violations verbatim; both used to reach the UI as engine jargon like
+ * "duplicate key value violates unique constraint".
+ */
+function friendlyWriteError(message: string): string {
+  if (/duplicate key|23505/i.test(message)) {
+    return "This adjustment was just saved by another action. Reload and try again.";
+  }
+  if (/already teaching another class/i.test(message)) {
+    return "That teacher already teaches another class at this day and period.";
+  }
+  if (/already assigned to another class/i.test(message)) {
+    return "That teacher is already assigned to another class on this date and period.";
+  }
+  if (/non-school day/i.test(message)) {
+    return "Cannot adjust on a non-school day (Friday or Saturday).";
+  }
+  if (/outside the allowed range/i.test(message)) {
+    return `That period is not allowed for this class on this day (${message}).`;
+  }
+  return message;
+}
+
+/**
+ * Every surface that renders substitutions. The weekly grids now overlay the
+ * whole school week, so /admin/free-teachers must be invalidated too — it was
+ * missing before and kept showing the pre-save free/busy split for a full
+ * minute.
+ */
+function revalidateAdjustmentViews() {
+  revalidatePath("/admin/adjust");
+  revalidatePath("/admin/free-teachers");
+  revalidatePath("/");
+  revalidatePath("/routine");
+  revalidatePath("/teacher");
+  revalidateTag("adjustments");
+}
+
+/**
  * Replace the date-scoped adjustments for (date, section).
  * Pass only the periods that have a substitution (newTeacherId set);
  * clearing a substitution = omitting it from the list.
@@ -122,7 +163,7 @@ export async function saveDayAdjustments(
     if (insErr) return { error: insErr.message };
   }
 
-  revalidatePath("/admin/adjust");
+  revalidateAdjustmentViews();
   return { success: true, savedCount: insertRows.length };
 }
 
@@ -136,7 +177,7 @@ export async function saveAllAdjustments(
   changes: PeriodAdjustment[],
   force: boolean,
 ) {
-  const { admin } = await authed();
+  const { admin, session } = await authed();
   const effectiveDate = resolveAdjustDate(adjustDate);
   if (!effectiveDate) return { error: "Date is required." };
 
@@ -248,7 +289,10 @@ export async function saveAllAdjustments(
         r.section_id === c.sectionId &&
         r.is_tag === c.isTag,
     );
-    const baseRow = routines.find(
+    // Must come from `allRoutines` (never overlaid). Reverting to a row of the
+    // overlaid set would restore the SAVED SUBSTITUTE rather than the genuine
+    // original, so re-editing an existing adjustment graded the wrong teacher.
+    const baseRow = allRoutines.find(
       (r) =>
         r.day === dayIndex &&
         r.period_number === c.period &&
@@ -290,7 +334,7 @@ export async function saveAllAdjustments(
     return { warnings };
   }
 
-  // Group changes by section for delete-then-insert.
+  // Group changes by section so each (date, section) batch is written once.
   const bySection = new Map<string, PeriodAdjustment[]>();
   for (const c of changes) {
     if (!bySection.has(c.sectionId)) bySection.set(c.sectionId, []);
@@ -298,51 +342,165 @@ export async function saveAllAdjustments(
   }
 
   let savedCount = 0;
-  for (const [sectionId, sectionChanges] of bySection) {
-    const { error: delErr } = await admin
-      .from("adjustment_batches")
-      .delete()
-      .eq("adjust_date", effectiveDate)
-      .eq("section_id", sectionId);
-    if (delErr) return { error: delErr.message };
 
+  for (const [sectionId, sectionChanges] of bySection) {
     const insertRows = sectionChanges
       .filter((c) => c.newTeacherId || c.newSubjectId || c.newRoomId)
-      .map((c) => ({
-        period_number: c.period,
-        assignment_role: c.isTag ? "tag" : "primary",
-        original_teacher_id: c.originalTeacherId,
-        new_teacher_id: c.newTeacherId,
-        original_subject_id: c.originalSubjectId,
-        new_subject_id: c.newSubjectId,
-        original_room_id: c.originalRoomId,
-        new_room_id: c.newRoomId,
-        reason: c.reason ?? null,
-      }));
+      .map((c) => {
+        // `original_*` is DERIVED from the base weekly routine, never taken from
+        // the client. The client only ever sees the post-adjustment state, so a
+        // value it sends for a re-edit is the previous substitute — trusting it
+        // rewrote the audit chain on every edit (A -> B -> A recorded
+        // "original = B"). The base row is the only stable truth, and it is
+        // what makes repeated edits safe.
+        const base = allRoutines.find(
+          (r) =>
+            r.day === dayIndex &&
+            r.period_number === c.period &&
+            r.section_id === c.sectionId &&
+            r.is_tag === c.isTag,
+        );
+        return {
+          period_number: c.period,
+          assignment_role: c.isTag ? "tag" : "primary",
+          original_teacher_id: base?.teacher_id ?? null,
+          new_teacher_id: c.newTeacherId,
+          original_subject_id: base?.subject_id ?? null,
+          new_subject_id: c.newSubjectId,
+          original_room_id: base?.room_id ?? null,
+          new_room_id: c.newRoomId,
+          reason: c.reason ?? null,
+        };
+      });
 
-    if (insertRows.length > 0) {
-      const { data: batch, error: batchErr } = await admin
-        .from("adjustment_batches")
-        .insert({
+    // Nothing to write for this section (e.g. every change was a no-op) — do not
+    // create an empty batch, since the CHECK constraint below rejects all-null
+    // rows and an empty batch is pure litter.
+    if (insertRows.length === 0) continue;
+
+    // Upsert the batch on its natural key. A plain INSERT raced with itself the
+    // moment the same section was saved twice (23505 on
+    // unique(adjust_date, section_id)); upsert is idempotent and also keeps the
+    // batch id stable across edits instead of churning a new one each time.
+    const { data: batch, error: batchErr } = await admin
+      .from("adjustment_batches")
+      .upsert(
+        {
           adjust_date: effectiveDate,
           section_id: sectionId,
-          created_by: null,
-        })
-        .select("id")
-        .single();
-      if (batchErr) return { error: batchErr.message };
-      const { error: insErr } = await admin
-        .from("adjustment_assignments")
-        .insert(insertRows.map((row) => ({ ...row, batch_id: batch.id })));
-      if (insErr) return { error: insErr.message };
-      savedCount += insertRows.length;
-    }
+          created_by: session.id,
+        },
+        { onConflict: "adjust_date,section_id" },
+      )
+      .select("id")
+      .single();
+    if (batchErr) return { error: friendlyWriteError(batchErr.message) };
+
+    // Replace ONLY the periods being written, and do it as a single atomic
+    // statement rather than delete-then-insert.
+    //
+    // The previous sequence deleted the existing rows first and then inserted.
+    // If the insert was rejected — say the conflict trigger fired — the old,
+    // working substitution had already been destroyed, leaving the period with
+    // no adjustment at all. That is exactly the "the period just vanishes"
+    // failure. `onConflict: batch_id,period_number,assignment_role` targets the
+    // table's natural key, so one upsert both creates and replaces and a
+    // rejection leaves the previous row untouched.
+    //
+    // Rows for periods NOT in this payload are deliberately not mentioned, so
+    // sibling adjustments on the same day survive.
+    const { error: insErr } = await admin
+      .from("adjustment_assignments")
+      .upsert(
+        insertRows.map((row) => ({ ...row, batch_id: batch.id })),
+        { onConflict: "batch_id,period_number,assignment_role" },
+      );
+    if (insErr) return { error: friendlyWriteError(insErr.message) };
+
+    savedCount += insertRows.length;
   }
 
-  revalidatePath("/admin/adjust");
-  revalidatePath("/");
-  revalidatePath("/routine");
-  revalidatePath("/teacher");
-  revalidateTag("adjustments");
+  revalidateAdjustmentViews();
   return { success: true, savedCount };
+}
+
+/**
+ * Clear saved adjustments for specific periods of a (date, section).
+ *
+ * Backs both the "Revert to original teacher" and "Remove adjustment" actions —
+ * they are the same database operation. Deleting the row makes the base weekly
+ * routine's teacher effective again, which is exactly what "revert" means.
+ *
+ * Only the requested periods are deleted, so sibling adjustments on the same
+ * day survive. A missing batch or a period that has no adjustment is a no-op
+ * success rather than an error, which keeps the action idempotent.
+ */
+export async function removeAdjustment(
+  adjustDate: string,
+  sectionId: string,
+  entries: { period: number; isTag: boolean }[],
+) {
+  const { admin } = await authed();
+  const effectiveDate = resolveAdjustDate(adjustDate);
+  if (!effectiveDate || !sectionId)
+    return { error: "Date and section are required." };
+  if (!entries || entries.length === 0)
+    return { error: "No periods to clear." };
+
+  const dayIndex = getSchoolDayIndex(new Date(effectiveDate + "T00:00:00"));
+  if (dayIndex === null) return { error: "Cannot adjust on a weekend." };
+
+  const { data: batch, error: batchErr } = await admin
+    .from("adjustment_batches")
+    .select("id")
+    .eq("adjust_date", effectiveDate)
+    .eq("section_id", sectionId)
+    .maybeSingle();
+  if (batchErr) return { error: friendlyWriteError(batchErr.message) };
+  // Nothing saved for this section/day — already in the desired state.
+  if (!batch) return { success: true, removed: 0 };
+
+  // Delete by exact (period, role) identity rather than a period-only `in()`:
+  // a primary and a tag adjustment share a period, and removing one must not
+  // take the other with it.
+  const predicate = entries
+    .map(
+      (e) =>
+        `and(period_number.eq.${Number(e.period)},assignment_role.eq.${
+          e.isTag ? "tag" : "primary"
+        })`,
+    )
+    .join(",");
+
+  const { data: doomed, error: selectErr } = await admin
+    .from("adjustment_assignments")
+    .select("id")
+    .eq("batch_id", batch.id)
+    .or(predicate);
+  if (selectErr) return { error: friendlyWriteError(selectErr.message) };
+
+  const ids = (doomed ?? []).map((row) => row.id as string);
+  if (ids.length === 0) return { success: true, removed: 0 };
+
+  const { error: delErr } = await admin
+    .from("adjustment_assignments")
+    .delete()
+    .in("id", ids);
+  if (delErr) return { error: friendlyWriteError(delErr.message) };
+
+  // Drop the batch once it is empty. An orphaned batch is invisible through the
+  // `adjustments` view but still occupies the unique key and shows up in
+  // maintenance queries, so clean it up. A failure here is not worth reporting
+  // — the rows the user cared about are already gone.
+  const { data: remaining } = await admin
+    .from("adjustment_assignments")
+    .select("id")
+    .eq("batch_id", batch.id)
+    .limit(1);
+  if (!remaining || remaining.length === 0) {
+    await admin.from("adjustment_batches").delete().eq("id", batch.id);
+  }
+
+  revalidateAdjustmentViews();
+  return { success: true, removed: ids.length };
 }

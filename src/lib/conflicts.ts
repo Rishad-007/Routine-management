@@ -1,4 +1,8 @@
 import { TIFFIN_AFTER_PERIOD } from "./constants";
+import {
+  getSchoolWeekRange,
+  getTodayLocal,
+} from "./periods";
 import type { AdjustmentRow, RoutineRow } from "./types";
 
 export type WarningLevel = "yellow" | "red" | "ok";
@@ -21,6 +25,80 @@ export function applyAdjustmentsToRoutines(
     );
     if (!adjustment?.new_teacher_id) return routine;
     return { ...routine, teacher_id: adjustment.new_teacher_id };
+  });
+}
+
+/** School week (Sunday..Saturday) that an adjustment belongs to, as YYYY-MM-DD. */
+function weekBoundsFor(adjustDate: string): { start: string; end: string } {
+  const [y, m, d] = adjustDate.split("-").map(Number);
+  return getSchoolWeekRange(new Date(y, m - 1, d));
+}
+
+/** Day-of-week (0=Sun..4=Thu) for an adjustment's date, or null at a weekend. */
+function dayOfAdjustment(adjustDate: string): number | null {
+  const [y, m, d] = adjustDate.split("-").map(Number);
+  const dow = new Date(y, m - 1, d).getDay();
+  return dow > 4 ? null : dow;
+}
+
+/**
+ * Overlay every substitution in a school week onto the weekly routine.
+ *
+ * The key includes the routine's `day`, which `applyAdjustmentsToRoutines`
+ * above omits. That omission is why both of its callers had to pre-filter the
+ * week down to a single weekday before calling it: with a dayless key the same
+ * section+period matched on every weekday and one Wednesday cover silently
+ * rewrote the Monday, Tuesday and Thursday slots too. Keying on day makes a
+ * whole-week application correct, which is what live class showing needs.
+ *
+ * Each adjustment is placed on the weekday its date actually falls on, so a
+ * cover made for Tuesday shows in the Tuesday column and leaves every other
+ * column on its base routine. Friday and Saturday are skipped outright (see
+ * `dayOfAdjustment` below), since the school week is Sunday..Thursday.
+ *
+ * Also honours `new_subject_id` / `new_room_id`. The single-date version above
+ * only swapped `teacher_id`, so a subject-only or room-only adjustment rendered
+ * differently here than in the public grids, which do honour them.
+ *
+ * Swapped rows are stamped `is_adjusted: true` plus `original_teacher_id`,
+ * because the `routines` view hardcodes both to false/null — without a
+ * provenance marker nothing downstream can tell a real weekly class from a
+ * temporary cover.
+ */
+export function applyWeekAdjustmentsToRoutines(
+  routines: RoutineRow[],
+  adjustments: AdjustmentRow[],
+  reference?: Date,
+): RoutineRow[] {
+  const bounds = reference
+    ? getSchoolWeekRange(reference)
+    : weekBoundsFor(getTodayLocal());
+
+  const byCell = new Map<string, AdjustmentRow>();
+  for (const a of adjustments) {
+    if (a.adjust_date < bounds.start || a.adjust_date > bounds.end) continue;
+    const dow = dayOfAdjustment(a.adjust_date);
+    if (dow === null) continue;
+    byCell.set(`${a.section_id}:${dow}:${a.period_number}:${a.is_tag}`, a);
+  }
+
+  if (byCell.size === 0) return routines;
+
+  return routines.map((routine) => {
+    const adjustment = byCell.get(
+      `${routine.section_id}:${routine.day}:${routine.period_number}:${routine.is_tag}`,
+    );
+    if (!adjustment) return routine;
+
+    const changes: Partial<RoutineRow> = { is_adjusted: true };
+    if (adjustment.new_teacher_id) {
+      changes.teacher_id = adjustment.new_teacher_id;
+      changes.original_teacher_id = routine.teacher_id;
+    }
+    if (adjustment.new_subject_id) changes.subject_id = adjustment.new_subject_id;
+    if (adjustment.new_room_id) changes.room_id = adjustment.new_room_id;
+
+    return { ...routine, ...changes };
   });
 }
 
@@ -157,6 +235,16 @@ export function isTeacherBusy(
 export interface RoutineIndex {
   /** "day:period" -> ids of teachers occupying it (primary AND tag). */
   busyAt: Map<string, Set<string>>;
+  /**
+   * "day:period" -> ids of teachers occupying it ONLY because of a
+   * substitution (rows stamped `is_adjusted` by applyWeekAdjustmentsToRoutines).
+   *
+   * Lets the UI answer "is this teacher genuinely free, or only holding a
+   * one-week cover?" — the whole point of live class showing. Purely
+   * presentational: `busyAt` stays authoritative for double-booking checks, so
+   * nothing here can let a substitute be double-booked.
+   */
+  adjustedAt: Map<string, Set<string>>;
   /** teacherId -> day -> distinct period numbers taught. */
   byTeacherDay: Map<string, Map<number, Set<number>>>;
   /** teacherId -> distinct (day, period) cells across the week. */
@@ -166,6 +254,7 @@ export interface RoutineIndex {
 /** Index a routine snapshot in one pass. */
 export function buildRoutineIndex(routines: RoutineRow[]): RoutineIndex {
   const busyAt = new Map<string, Set<string>>();
+  const adjustedAt = new Map<string, Set<string>>();
   const byTeacherDay = new Map<string, Map<number, Set<number>>>();
 
   for (const r of routines) {
@@ -175,6 +264,12 @@ export function buildRoutineIndex(routines: RoutineRow[]): RoutineIndex {
     let occupants = busyAt.get(cell);
     if (!occupants) busyAt.set(cell, (occupants = new Set()));
     occupants.add(r.teacher_id);
+
+    if (r.is_adjusted) {
+      let covers = adjustedAt.get(cell);
+      if (!covers) adjustedAt.set(cell, (covers = new Set()));
+      covers.add(r.teacher_id);
+    }
 
     let days = byTeacherDay.get(r.teacher_id);
     if (!days) byTeacherDay.set(r.teacher_id, (days = new Map()));
@@ -190,7 +285,17 @@ export function buildRoutineIndex(routines: RoutineRow[]): RoutineIndex {
     weeklyTotal.set(teacherId, total);
   }
 
-  return { busyAt, byTeacherDay, weeklyTotal };
+  return { busyAt, adjustedAt, byTeacherDay, weeklyTotal };
+}
+
+/** Is this teacher holding the cell because of a substitution rather than their own class? */
+export function isCoveringIndexed(
+  index: RoutineIndex,
+  teacherId: string,
+  day: number,
+  period: number,
+): boolean {
+  return index.adjustedAt.get(`${day}:${period}`)?.has(teacherId) ?? false;
 }
 
 /** Indexed `isTeacherBusy`. Tag sessions count as busy, matching the DB trigger. */

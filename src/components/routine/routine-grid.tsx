@@ -17,6 +17,10 @@ export interface RoutineCell {
   isTag?: boolean;
   isAdjusted?: boolean;
   isTagAdjusted?: boolean;
+  /** Date a substitution applies to (week overlay only). */
+  adjustedDate?: string;
+  /** Teacher displaced by the substitution, for "covering for X" tooltips. */
+  originalTeacher?: string;
 }
 
 export type RoutineMatrix = Record<number, Record<number, RoutineCell | undefined>>;
@@ -114,8 +118,16 @@ export function RoutineGrid({
                           </p>
                         )}
                         {cell.isAdjusted && (
-                          <Badge variant="secondary" className="text-[8px] bg-amber-100 text-amber-700 px-1 py-0">
-                            Adj
+                          <Badge
+                            variant="secondary"
+                            className="bg-amber-100 px-1 py-0 text-[8px] text-amber-700"
+                            title={
+                              cell.originalTeacher
+                                ? `Temporary cover for ${cell.originalTeacher}${cell.adjustedDate ? ` on ${cell.adjustedDate}` : ""} — not a permanent weekly class.`
+                                : "Temporary adjustment — not a permanent weekly class."
+                            }
+                          >
+                            {variant === "compact" ? "Cover" : "Adj"}
                           </Badge>
                         )}
 

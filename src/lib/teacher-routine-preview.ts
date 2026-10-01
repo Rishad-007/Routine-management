@@ -8,6 +8,14 @@ export interface RoutinePreviewSourceRow {
   subject_id: string | null;
   room_id: string | null;
   is_tag: boolean;
+  /**
+   * Set when this row is occupied by a substitution rather than the teacher's
+   * own weekly class (see applyWeekAdjustmentsToRoutines). Optional so callers
+   * that pass raw un-overlaid routines — the base routine editor, for one — keep
+   * working unchanged.
+   */
+  is_adjusted?: boolean;
+  original_teacher_id?: string | null;
 }
 
 export interface TeacherRoutinePreviewCell {
@@ -17,6 +25,12 @@ export interface TeacherRoutinePreviewCell {
   room: string;
   isTag: boolean;
   continuous: number;
+  /** This cell is a temporary cover, not part of the base weekly routine. */
+  isAdjusted: boolean;
+  /** Name of the displaced teacher, when resolvable. */
+  originalTeacherName: string;
+  /** Label such as "P3 · Wed" for the cover's tooltip. */
+  coveringFor: string;
 }
 
 export interface TeacherRoutinePreview {
@@ -32,12 +46,18 @@ export interface BuildTeacherRoutinePreviewOptions {
   subjectLabel: (subjectId: string) => string;
   sectionLabel: (sectionId: string) => string;
   roomLabel: (roomId: string) => string;
+  /** Names displaced teachers so a cover can be labelled "covering for X". */
+  teacherLabel?: (teacherId: string) => string;
 }
 
 /**
  * Build the weekly (Sun–Thu × P1–P7) routine grid for one teacher, including
  * continuous-run detection (tiffin separates runs). Used by the admin "Adjust
  * Routine" and "Free Teachers" dialogs so both come from a single source.
+ *
+ * Rows are expected to be pre-overlaid (applyWeekAdjustmentsToRoutines) for the
+ * substitute's covered class to appear at all; `is_adjusted` then distinguishes
+ * a one-week cover from the teacher's own recurring class.
  */
 export function buildTeacherRoutinePreview({
   routines,
@@ -45,23 +65,26 @@ export function buildTeacherRoutinePreview({
   subjectLabel,
   sectionLabel,
   roomLabel,
+  teacherLabel,
 }: BuildTeacherRoutinePreviewOptions): TeacherRoutinePreview {
   const cells = new Map<string, TeacherRoutinePreviewCell>();
 
   for (const day of DAY_ORDER) {
-    const teacherPeriods = new Set(
-      routines
-        .filter((r) => r.teacher_id === teacherId && r.day === day)
-        .map((r) => r.period_number),
+    const dayRows = routines.filter(
+      (r) => r.teacher_id === teacherId && r.day === day,
     );
+    const teacherPeriods = new Set(dayRows.map((r) => r.period_number));
+
+    // Prefer the primary row, but fall back to the tag row. A plain `find()`
+    // used to take whichever arrived first, so when a teacher held both roles
+    // in the same cell the adjusted tag cover could be dropped entirely and the
+    // dialog disagreed with the grid.
+    const rowAt = (period: number) =>
+      dayRows.find((r) => r.period_number === period && !r.is_tag) ??
+      dayRows.find((r) => r.period_number === period);
 
     for (const period of PERIOD_ORDER) {
-      const routine = routines.find(
-        (r) =>
-          r.teacher_id === teacherId &&
-          r.day === day &&
-          r.period_number === period,
-      );
+      const routine = rowAt(period);
       if (!routine) continue;
 
       let continuous = 1;
@@ -80,6 +103,11 @@ export function buildTeacherRoutinePreview({
         continuous += 1;
       }
 
+      const originalName =
+        routine.original_teacher_id && teacherLabel
+          ? teacherLabel(routine.original_teacher_id)
+          : "";
+
       cells.set(`${day}:${period}`, {
         period,
         subject: routine.subject_id ? subjectLabel(routine.subject_id) : "—",
@@ -87,6 +115,11 @@ export function buildTeacherRoutinePreview({
         room: routine.room_id ? roomLabel(routine.room_id) : "—",
         isTag: routine.is_tag,
         continuous,
+        isAdjusted: !!routine.is_adjusted,
+        originalTeacherName: originalName,
+        coveringFor: originalName
+          ? `Temporary cover for ${originalName} — not part of their weekly routine.`
+          : "Temporary adjustment — not part of the weekly routine.",
       });
     }
   }

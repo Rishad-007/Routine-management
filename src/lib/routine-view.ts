@@ -9,7 +9,7 @@ import type {
   AdjustmentRow,
 } from "./types";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
-import { getSchoolDayIndex } from "./periods";
+import { getSchoolDayIndex, toLocalDateString } from "./periods";
 
 export interface RoutineLookups {
   teachers: TeacherRow[];
@@ -21,6 +21,10 @@ interface AdjustOverride {
   newTeacherId: string | null;
   newSubjectId: string | null;
   newRoomId: string | null;
+  /** Date the substitution applies to, so a week overlay can label the cover. */
+  adjustDate: string;
+  /** Teacher displaced by the substitution, for "covering for X" labels. */
+  originalTeacherId: string | null;
 }
 
 /** Parse "YYYY-MM-DD" into a LOCAL Date (avoids UTC-midnight ambiguity). */
@@ -30,7 +34,36 @@ function parseLocalDate(dateStr: string): Date {
 }
 
 /**
- * Build a map of today's effective overrides per section+day+period.
+ * Build a map of effective overrides per section+day+period.
+ * Returns Map<"sectionId:day:period", AdjustOverride>.
+ *
+ * `dates` decides which days participate. Pass a single date for today's
+ * routine, or every date of the school week for live class showing — the key
+ * shape is identical, so both matrix builders work unchanged either way.
+ */
+function buildOverrides(
+  adjustments: AdjustmentRow[],
+  dates: (adjustDate: string) => boolean,
+  isTag: boolean,
+): Map<string, AdjustOverride> {
+  const map = new Map<string, AdjustOverride>();
+  for (const a of adjustments) {
+    if (a.is_tag !== isTag || !dates(a.adjust_date)) continue;
+    const dayIndex = getSchoolDayIndex(parseLocalDate(a.adjust_date));
+    if (dayIndex === null) continue;
+    map.set(`${a.section_id}:${dayIndex}:${a.period_number}`, {
+      newTeacherId: a.new_teacher_id,
+      newSubjectId: a.new_subject_id,
+      newRoomId: a.new_room_id,
+      adjustDate: a.adjust_date,
+      originalTeacherId: a.original_teacher_id,
+    });
+  }
+  return map;
+}
+
+/**
+ * Build a map of TODAY's effective overrides per section+day+period.
  * Returns Map<"sectionId:day:period", AdjustOverride>.
  */
 export function buildTodayOverrides(
@@ -38,18 +71,37 @@ export function buildTodayOverrides(
   today: string,
   isTag: boolean,
 ): Map<string, AdjustOverride> {
-  const map = new Map<string, AdjustOverride>();
-  for (const a of adjustments) {
-    if (a.adjust_date !== today || a.is_tag !== isTag) continue;
-    const dayIndex = getSchoolDayIndex(parseLocalDate(a.adjust_date));
-    if (dayIndex === null) continue;
-    map.set(`${a.section_id}:${dayIndex}:${a.period_number}`, {
-      newTeacherId: a.new_teacher_id,
-      newSubjectId: a.new_subject_id,
-      newRoomId: a.new_room_id,
-    });
-  }
-  return map;
+  return buildOverrides(adjustments, (d) => d === today, isTag);
+}
+
+/**
+ * Build a map of effective overrides for a whole school week.
+ *
+ * This is what makes a substitute's covered class appear in a WEEKLY grid: the
+ * override is filed under the weekday its date falls on, so a Wednesday cover
+ * lands in the Wednesday column and leaves every other column alone. Restricting
+ * this to today (the previous behaviour, via buildTodayOverrides) meant a
+ * substitute looking at their own weekly routine saw nothing at all on any day
+ * except the one they happened to open it.
+ *
+ * The range is Sun..Sat to match the routine model's `day` 0=Sunday..4=Thursday,
+ * so all five teaching days of a week fall inside one window and the cover
+ * expires on its own the following week.
+ */
+export function buildWeekOverrides(
+  adjustments: AdjustmentRow[],
+  weekStart: string,
+  isTag: boolean,
+): Map<string, AdjustOverride> {
+  const start = parseLocalDate(weekStart);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const endStr = toLocalDateString(end);
+  return buildOverrides(
+    adjustments,
+    (d) => d >= weekStart && d <= endStr,
+    isTag,
+  );
 }
 
 /** Build a Day(0-4) x Period(1-7) matrix for a given section. */
@@ -144,6 +196,10 @@ export function buildSectionMatrix(
       isTag,
       isAdjusted,
       isTagAdjusted,
+      adjustedDate: pOverride?.adjustDate,
+      originalTeacher: pOverride?.originalTeacherId
+        ? teacherName(pOverride.originalTeacherId)
+        : undefined,
     };
   }
   return matrix;
@@ -159,8 +215,16 @@ export function buildTeacherMatrix(
   rooms: RoomRow[],
   todayOverrides?: Map<string, AdjustOverride>,
   tagOverrides?: Map<string, AdjustOverride>,
+  /**
+   * Optional: only used to name the teacher a substitution displaced, so a
+   * cover reads "covering for X". Only id + full_name are needed, so callers may
+   * pass a narrow projection straight from the DB.
+   */
+  teachers?: Pick<TeacherRow, "id" | "full_name">[],
 ): RoutineMatrix {
   const matrix: RoutineMatrix = {};
+  const teacherName = (id: string | null) =>
+    id ? teachers?.find((t) => t.id === id)?.full_name : undefined;
   const sectionLabel = (id: string) => {
     const s = sections.find((x) => x.id === id);
     if (!s) return "—";
@@ -202,6 +266,15 @@ export function buildTeacherMatrix(
       room: roomName(effectiveRoomId),
       classLabel: effectiveClass,
       isAdjusted: !!override,
+      // Provenance for "live class showing": when this cell is only occupied
+      // because of a substitution, record whose class it is and which day it
+      // applies to, so the grid can say "covering for X" instead of presenting
+      // a one-week cover as a permanent weekly class.
+      adjustedDate: override?.adjustDate,
+      originalTeacher: override?.originalTeacherId
+        ? teacherName(override.originalTeacherId)
+        : undefined,
+      isTagAdjusted: r.is_tag ? !!override : undefined,
     };
   }
   return matrix;

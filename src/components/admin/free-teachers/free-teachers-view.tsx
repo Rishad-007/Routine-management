@@ -36,6 +36,8 @@ export interface TeacherAvailability {
   weekTotal: number;
   /** For busy teachers, the "Class 6 — Jui" label of the section they are in. */
   where: string | null;
+  /** Busy only because of a saved one-week cover, not their own class. */
+  isCovering?: boolean;
 }
 
 export interface PeriodAvailability {
@@ -50,10 +52,13 @@ interface Props {
   day: number;
   periods: PeriodAvailability[];
   totalTeachers: number;
+  /** Some substitution is in effect on the selected weekday. */
   adjustedToday: boolean;
   subjectLabels: Record<string, string>;
   roomLabels: Record<string, string>;
   routineSectionLabels: Record<string, string>;
+  /** Displaced teacher id -> name, so covers can be attributed. */
+  teacherLabels: Record<string, string>;
   routineRows: RoutinePreviewSourceRow[];
 }
 
@@ -65,6 +70,7 @@ export function FreeTeachersView({
   subjectLabels,
   roomLabels,
   routineSectionLabels,
+  teacherLabels,
   routineRows,
 }: Props) {
   const router = useRouter();
@@ -108,6 +114,7 @@ export function FreeTeachersView({
       subjectLabel: (id) => subjectLabels[id] ?? "—",
       sectionLabel: (id) => routineSectionLabels[id] ?? "—",
       roomLabel: (id) => roomLabels[id] ?? "—",
+      teacherLabel: (id) => teacherLabels[id] ?? "",
     });
   }, [
     routineTeacherId,
@@ -115,6 +122,7 @@ export function FreeTeachersView({
     subjectLabels,
     routineSectionLabels,
     roomLabels,
+    teacherLabels,
   ]);
 
   const openRoutine = (id: string) => setRoutineTeacherId(id);
@@ -142,8 +150,8 @@ export function FreeTeachersView({
       {adjustedToday && (
         <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           <Info className="h-4 w-4 shrink-0" />
-          Today&apos;s substitutions are applied, so this reflects who is
-          actually free right now.
+          Substitutions saved for this week are applied, so this reflects who
+          is actually free on {DAY_LABELS[day]}.
         </p>
       )}
 
@@ -297,6 +305,8 @@ export function FreeTeachersView({
                                   isContinuous && "bg-amber-50",
                                   (cell?.continuous ?? 0) >= 3 &&
                                     "bg-orange-100",
+                                  cell?.isAdjusted &&
+                                    "border-2 border-dashed border-teal-400",
                                 )}
                               >
                                 {cell ? (
@@ -314,6 +324,17 @@ export function FreeTeachersView({
                                     {isContinuous && (
                                       <Badge className="bg-amber-200 px-1 py-0 text-[9px] text-amber-900">
                                         {cell.continuous} continuous
+                                      </Badge>
+                                    )}
+                                    {cell.isAdjusted && (
+                                      <Badge
+                                        className="bg-teal-100 px-1 py-0 text-[9px] text-teal-800"
+                                        title={cell.coveringFor}
+                                      >
+                                        Cover
+                                        {cell.originalTeacherName
+                                          ? ` for ${cell.originalTeacherName}`
+                                          : ""}
                                       </Badge>
                                     )}
                                   </div>
@@ -396,10 +417,19 @@ function Section({
                       Open
                     </span>
                   )}
+                  {/* Busy only while covering someone: without this the admin
+                      reads a temporary stand-in as a permanent clash and skips
+                      a genuinely available teacher. */}
+                  {tone === "busy" && t.isCovering && (
+                    <span className="rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-medium text-teal-700">
+                      covering
+                    </span>
+                  )}
                 </p>
                 <p className="truncate text-xs text-slate-500">
                   {t.code} · today {t.dayCount} · week {t.weekTotal}
                   {tone === "busy" && t.where ? ` · in ${t.where}` : ""}
+                  {tone === "busy" && t.isCovering ? " · this cover" : ""}
                 </p>
               </div>
               <Eye

@@ -3,9 +3,9 @@ import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT, type Season } from "@/lib/constants";
-import { getTodayLocal } from "@/lib/periods";
+import { getSchoolWeekRange } from "@/lib/periods";
 import { fetchAllRows, type PagedQuery } from "@/lib/data";
-import { buildTeacherMatrix, buildTodayOverrides } from "@/lib/routine-view";
+import { buildTeacherMatrix, buildWeekOverrides } from "@/lib/routine-view";
 import type {
   SectionRow,
   ClassRow,
@@ -99,10 +99,14 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminClient();
-  const today = getTodayLocal();
+  // Only the current school week's substitutions are live, so the printed
+  // sheet matches what /teacher shows. Previously scoped to a single date,
+  // which meant the PDF printed a stale week whenever it was generated on a
+  // day that happened to have no substitution.
+  const week = getSchoolWeekRange();
 
   // `routines` is 3000+ rows — paged, or the PDF silently omits most periods.
-  const [teaRes, clsRes, secRes, subRes, roomRes, allRoutines, adjRes, seasonRes] =
+  const [teaRes, clsRes, secRes, subRes, roomRes, allRoutines, adjRes, seasonRes, teacherRes] =
     await Promise.all([
       admin.from("teachers").select("*").eq("id", teacherId).single(),
       admin.from("classes").select("*"),
@@ -115,8 +119,14 @@ export async function GET(req: NextRequest) {
             .from("routines")
             .select("*", { count: "exact" }) as unknown as PagedQuery<RoutineRow>,
       ),
-      admin.from("adjustments").select("*").eq("adjust_date", today),
+      admin
+        .from("adjustments")
+        .select("*")
+        .gte("adjust_date", week.start)
+        .lte("adjust_date", week.end),
       admin.from("settings").select("value").eq("key", "season").maybeSingle(),
+      // Every teacher, so a cover can be attributed to the teacher it displaces.
+      admin.from("teachers").select("id, full_name"),
     ]);
 
   const teacher = teaRes.data as TeacherRow | null;
@@ -132,8 +142,12 @@ export async function GET(req: NextRequest) {
   const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
   const season = ((seasonRes.data?.value as Season) ?? "summer") as Season;
 
-  const todayPrimaryOverrides = buildTodayOverrides(adjustments, today, false);
-  const todayTagOverrides = buildTodayOverrides(adjustments, today, true);
+  const todayPrimaryOverrides = buildWeekOverrides(
+    adjustments,
+    week.start,
+    false,
+  );
+  const todayTagOverrides = buildWeekOverrides(adjustments, week.start, true);
   const matrix = buildTeacherMatrix(
     routines,
     teacherId,
@@ -142,7 +156,8 @@ export async function GET(req: NextRequest) {
     subjects,
     rooms,
     todayPrimaryOverrides,
-    todayTagOverrides
+    todayTagOverrides,
+    (teacherRes.data ?? []) as Pick<TeacherRow, "id" | "full_name">[],
   );
 
   const seasonLabel = season === "winter" ? "Winter" : "Summer";

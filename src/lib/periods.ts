@@ -173,4 +173,39 @@ export function resolveAdjustDate(adjustDate: string): string | null {
   return adjustDate;
 }
 
+/** Format a Date as local "YYYY-MM-DD" (never UTC — see getTodayLocal). */
+export function toLocalDateString(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * The school week (Sunday..Saturday) containing `reference`.
+ *
+ * Aligns with the routine model, where `day` 0 is Sunday and 4 is Thursday, so
+ * all five teaching days of a week always share one range. This is the window
+ * "live class showing" uses: a substitute's cover appears in the weekly grids
+ * for the rest of the week it was made in, then disappears on its own.
+ *
+ * Built from local midnight arithmetic. Using `toISOString()` here would shift
+ * the range by the UTC offset and silently drop or double-count the Sunday
+ * and Saturday edges.
+ */
+export function getSchoolWeekRange(reference?: Date): {
+  start: string;
+  end: string;
+} {
+  const d = reference ?? new Date();
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  // getDay() is 0=Sun, so subtracting it lands exactly on the preceding Sunday.
+  start.setDate(start.getDate() - start.getDay());
+
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+
+  return { start: toLocalDateString(start), end: toLocalDateString(end) };
+}
+
 export type { TimeBlock };

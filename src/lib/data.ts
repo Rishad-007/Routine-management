@@ -1,7 +1,7 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
 import { createAdminClient } from "./supabase/admin";
-import { getTodayLocal } from "./periods";
+import { getSchoolWeekRange, getTodayLocal } from "./periods";
 import {
   type ClassRow,
   type ClassPeriodRuleRow,
@@ -242,6 +242,33 @@ export const getAllAdjustments = unstable_cache(
   ["adjustments-all"],
   { tags: ["adjustments"], revalidate: CACHE_SECONDS },
 );
+
+/**
+ * Adjustments dated inside a given school week — the window "live class
+ * showing" uses.
+ *
+ * Deliberately NOT wrapped in `unstable_cache`: the range depends on the day
+ * the page happens to render, and baking "today" into a long-lived cache key
+ * would keep serving last week's covers after the week rolled over. The calling
+ * routes already bound freshness (`revalidate = 60` or `force-dynamic`).
+ *
+ * Paged, unlike `getAdjustments()` above — an unbounded select returns only the
+ * first 1000 rows, which would silently drop covers and make a substitute look
+ * free.
+ */
+export async function getAdjustmentsForWeek(
+  range?: { start: string; end: string },
+): Promise<AdjustmentRow[]> {
+  const client = db();
+  const week = range ?? getSchoolWeekRange();
+  return fetchAllRows<AdjustmentRow>(() =>
+    client
+      .from("adjustments")
+      .select("*", { count: "exact" })
+      .gte("adjust_date", week.start)
+      .lte("adjust_date", week.end) as unknown as PagedQuery<AdjustmentRow>,
+  );
+}
 
 export const getSettings = unstable_cache(
   async (): Promise<SettingsRow[]> => {

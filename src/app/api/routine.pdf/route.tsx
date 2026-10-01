@@ -9,7 +9,7 @@ import {
 } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT } from "@/lib/constants";
-import { getTodayLocal, getSchoolDayIndex } from "@/lib/periods";
+import { getSchoolWeekRange, getSchoolDayIndex } from "@/lib/periods";
 import type {
   SectionRow,
   RoutineRow,
@@ -109,7 +109,17 @@ async function getSectionRoutine(sectionId: string) {
       admin.from("subjects").select("*"),
       admin.from("rooms").select("*"),
       admin.from("classes").select("*"),
-      admin.from("adjustments").select("*").eq("adjust_date", getTodayLocal()),
+      // Current school week only: substitutions are live for one week, and a
+      // single-date query used to print a stale sheet on days that happened to
+      // have no substitution of their own.
+      (() => {
+        const week = getSchoolWeekRange();
+        return admin
+          .from("adjustments")
+          .select("*")
+          .gte("adjust_date", week.start)
+          .lte("adjust_date", week.end);
+      })(),
     ]);
 
   const section = secRes.data as SectionRow | null;
@@ -123,11 +133,14 @@ async function getSectionRoutine(sectionId: string) {
 
   const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
 
-  // today's adjustments are already filtered in the query above; map the
-  // calendar date to its day-of-week index so only that day's cell is flagged.
-  const todayDay = getSchoolDayIndex(
-    new Date(getTodayLocal() + "T00:00:00")
-  );
+  // Each adjustment maps to the weekday its own date falls on, so a Wednesday
+  // cover is flagged in the Wednesday column of the printed sheet instead of
+  // being applied to whichever day happened to be printed.
+  const dayForAdjustDate = new Map<string, number>();
+  for (const a of adjustments) {
+    const dayIndex = getSchoolDayIndex(new Date(a.adjust_date + "T00:00:00"));
+    if (dayIndex !== null) dayForAdjustDate.set(a.adjust_date, dayIndex);
+  }
 
   const matrix: Record<number, Record<number, { subject?: string; teacher?: string; room?: string; subject2?: string; teacher2?: string; room2?: string; isTag?: boolean; isAdjusted?: boolean }>> = {};
 
@@ -159,7 +172,7 @@ async function getSectionRoutine(sectionId: string) {
       (a) =>
         a.period_number === period &&
         a.section_id === sectionId &&
-        day === todayDay &&
+        dayForAdjustDate.get(a.adjust_date) === day &&
         !a.is_tag
     );
     if (adj) {
@@ -179,7 +192,7 @@ async function getSectionRoutine(sectionId: string) {
         (a) =>
           a.period_number === period &&
           a.section_id === sectionId &&
-          day === todayDay &&
+          dayForAdjustDate.get(a.adjust_date) === day &&
           a.is_tag
       );
       if (tagAdj) {

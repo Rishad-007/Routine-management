@@ -6,10 +6,10 @@ import {
   getSubjects,
   getRooms,
   getSetting,
-  getAdjustments,
+  getAdjustmentsForWeek,
 } from "@/lib/data";
-import { buildSectionMatrix, buildTodayOverrides } from "@/lib/routine-view";
-import { getTodayLocal } from "@/lib/periods";
+import { buildSectionMatrix, buildWeekOverrides } from "@/lib/routine-view";
+import { getSchoolWeekRange } from "@/lib/periods";
 import type { Season } from "@/lib/constants";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
 import { RoutineViewer } from "@/components/public/routine-viewer";
@@ -22,6 +22,9 @@ export default async function RoutinePage({
   searchParams: Promise<{ section?: string; class?: string }>;
 }) {
   const params = await searchParams;
+  // Substitutions are live only for the current school week, so fetch just that
+  // window rather than every adjustment ever made.
+  const week = getSchoolWeekRange();
   const [classes, sections, routines, teachers, subjects, rooms, season, adjustments] =
     await Promise.all([
       getClasses(),
@@ -31,12 +34,18 @@ export default async function RoutinePage({
       getSubjects(),
       getRooms(),
       getSetting("season"),
-      getAdjustments(),
+      getAdjustmentsForWeek(week),
     ]);
 
-  const today = getTodayLocal();
-  const todayPrimaryOverrides = buildTodayOverrides(adjustments, today, false);
-  const todayTagOverrides = buildTodayOverrides(adjustments, today, true);
+  // Weekly (Sun–Sat) overlay: a Wednesday cover shows up in the Wednesday
+  // column. Restricting this to today meant the class routine hid every other
+  // substitution in the same week.
+  const todayPrimaryOverrides = buildWeekOverrides(
+    adjustments,
+    week.start,
+    false,
+  );
+  const todayTagOverrides = buildWeekOverrides(adjustments, week.start, true);
 
   const matrices: Record<string, RoutineMatrix> = {};
   for (const s of sections) {

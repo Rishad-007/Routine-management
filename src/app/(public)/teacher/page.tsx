@@ -6,10 +6,10 @@ import {
   getSubjects,
   getRooms,
   getSetting,
-  getAdjustments,
+  getAdjustmentsForWeek,
 } from "@/lib/data";
-import { buildTeacherMatrix, buildTodayOverrides } from "@/lib/routine-view";
-import { getTodayLocal } from "@/lib/periods";
+import { buildTeacherMatrix, buildWeekOverrides } from "@/lib/routine-view";
+import { getSchoolWeekRange } from "@/lib/periods";
 import type { Season } from "@/lib/constants";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
 import { TeacherRoutineViewer } from "@/components/public/teacher-routine-viewer";
@@ -22,6 +22,8 @@ export default async function TeacherPage({
   searchParams: Promise<{ q?: string }>;
 }) {
   const params = await searchParams;
+  // Only the current school week's substitutions are live.
+  const week = getSchoolWeekRange();
   const [
     teachers,
     routines,
@@ -39,12 +41,18 @@ export default async function TeacherPage({
     getSubjects(),
     getRooms(),
     getSetting("season"),
-    getAdjustments(),
+    getAdjustmentsForWeek(week),
   ]);
 
-  const today = getTodayLocal();
-  const todayPrimaryOverrides = buildTodayOverrides(adjustments, today, false);
-  const todayTagOverrides = buildTodayOverrides(adjustments, today, true);
+  // Weekly (Sun–Sat) overlay. This is the page a substitute checks for their
+  // own week, so scoping to today previously hid the very cover they were
+  // assigned on any other day.
+  const todayPrimaryOverrides = buildWeekOverrides(
+    adjustments,
+    week.start,
+    false,
+  );
+  const todayTagOverrides = buildWeekOverrides(adjustments, week.start, true);
 
   const matrices: Record<string, RoutineMatrix> = {};
   const teacherMeta: Record<string, { name: string; code: string }> = {};
@@ -57,7 +65,8 @@ export default async function TeacherPage({
       subjects,
       rooms,
       todayPrimaryOverrides,
-      todayTagOverrides
+      todayTagOverrides,
+      teachers,
     );
     teacherMeta[t.id] = { name: t.full_name, code: t.teacher_code };
   }

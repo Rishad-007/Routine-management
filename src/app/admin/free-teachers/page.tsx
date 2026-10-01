@@ -1,6 +1,6 @@
 import { requireAdmin } from "@/lib/auth";
 import {
-  getAdjustments,
+  getAdjustmentsForWeek,
   getClassPeriodRules,
   getClasses,
   getRooms,
@@ -10,14 +10,15 @@ import {
   getTeachers,
 } from "@/lib/data";
 import {
-  applyAdjustmentsToRoutines,
+  applyWeekAdjustmentsToRoutines,
   buildRoutineIndex,
   dayCountIndexed,
   isBusyIndexed,
+  isCoveringIndexed,
   stretchIndexed,
 } from "@/lib/conflicts";
 import { isPeriodAllowed } from "@/lib/class-period-rules";
-import { getSchoolDayIndex, getTodayLocal } from "@/lib/periods";
+import { getSchoolDayIndex, getSchoolWeekRange } from "@/lib/periods";
 import { DAY_ORDER, PERIOD_ORDER } from "@/lib/constants";
 import { DAY_LABELS } from "@/lib/types";
 import type { RoutinePreviewSourceRow } from "@/lib/teacher-routine-preview";
@@ -46,7 +47,10 @@ export default async function FreeTeachersPage({
     await Promise.all([
       getTeachers(),
       getRoutines(),
-      getAdjustments(),
+      // Explicit week range, not getAdjustments(): that helper only returns
+      // today onward, so browsing back to Monday on a Wednesday would silently
+      // drop Monday's cover — exactly the substitution the admin is checking.
+      getAdjustmentsForWeek(getSchoolWeekRange()),
       getSections(),
       getClasses(),
       getClassPeriodRules(),
@@ -54,16 +58,16 @@ export default async function FreeTeachersPage({
       getRooms(),
     ]);
 
-  // Substitutions are date-scoped, so they only describe *today*. A weekday
-  // index cannot tell "this Tuesday" from "next Tuesday", and getAdjustments()
-  // returns everything from today onward — so only overlay when the selected
-  // weekday is today.
-  const today = getTodayLocal();
+  // Substitutions are date-scoped, not weekday-scoped, so a saved adjustment
+  // for "this Wednesday" must be visible when the admin opens Wednesday — even
+  // if they never open the page on Wednesday itself. That is the whole point of
+  // live class showing. `applyWeekAdjustmentsToRoutines` files each override
+  // under the weekday its date actually falls on, so the day filter below
+  // picks out the right column and every other day stays on its base routine.
+  // Substitutes appear as covered (is_adjusted) so the view can flag that they
+  // hold the cell only temporarily.
   const dayRoutines = routines.filter((r) => r.day === day);
-  const adjustedToday = day === todayIndex;
-  const effective = adjustedToday
-    ? applyAdjustmentsToRoutines(dayRoutines, adjustments, today)
-    : dayRoutines;
+  const effective = applyWeekAdjustmentsToRoutines(dayRoutines, adjustments);
 
   const dayIndex = buildRoutineIndex(effective);
   // Weekly load stays on the unadjusted routine — a one-day cover is not a
@@ -105,17 +109,28 @@ export default async function FreeTeachersPage({
     routineSectionLabels[s.id] = `${cls}-${s.name}`;
   }
 
+  // So the weekly popup can say "covering for <name>" instead of a bare
+  // "cover", which would not tell the admin whose class is at stake.
+  const teacherLabels: Record<string, string> = {};
+  for (const t of teachers) teacherLabels[t.id] = t.full_name;
+
   // Slim per-period routine rows so the client can render a teacher's weekly
-  // routine popup without shipping the full RoutineRow type.
-  const routineRows: RoutinePreviewSourceRow[] = routines.map((r) => ({
-    teacher_id: r.teacher_id,
-    day: r.day,
-    period_number: r.period_number,
-    section_id: r.section_id,
-    subject_id: r.subject_id,
-    room_id: r.room_id,
-    is_tag: r.is_tag,
-  }));
+  // routine popup without shipping the full RoutineRow type. The popup is
+  // weekly, so it gets the whole-week overlay — otherwise a substitute looking
+  // at their own routine in this dialog would not see the class they are
+  // covering, which is precisely the thing they are being asked about.
+  const routineRows: RoutinePreviewSourceRow[] =
+    applyWeekAdjustmentsToRoutines(routines, adjustments).map((r) => ({
+      teacher_id: r.teacher_id,
+      day: r.day,
+      period_number: r.period_number,
+      section_id: r.section_id,
+      subject_id: r.subject_id,
+      room_id: r.room_id,
+      is_tag: r.is_tag,
+      is_adjusted: r.is_adjusted,
+      original_teacher_id: r.original_teacher_id,
+    }));
 
   // Ship only the derived per-period lists plus the slim routine rows above,
   // never the 3000+ full routine rows.
@@ -140,6 +155,10 @@ export default async function FreeTeachersPage({
                 r.day === day,
             )?.section_id ?? null)
           : null,
+        // Busy purely because of a saved cover — a genuine slot once that
+        // substitution is removed. `adjustedToday` replaced with an explicit
+        // signal so the client does not have to recompute it.
+        isCovering: isBusy && isCoveringIndexed(dayIndex, t.id, day, period),
       };
       if (isBusy) busy.push(entry);
       else free.push(entry);
@@ -178,7 +197,8 @@ export default async function FreeTeachersPage({
         day={day}
         periods={periods}
         totalTeachers={teachers.length}
-        adjustedToday={adjustedToday}
+        adjustedToday={effective.some((r) => r.is_adjusted)}
+        teacherLabels={teacherLabels}
         subjectLabels={subjectLabels}
         roomLabels={roomLabels}
         routineSectionLabels={routineSectionLabels}
