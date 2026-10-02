@@ -6,6 +6,7 @@ import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT, type Season } from "@/lib/constant
 import { getSchoolWeekRange } from "@/lib/periods";
 import { fetchAllRows, type PagedQuery } from "@/lib/data";
 import { buildTeacherMatrix, buildWeekOverrides } from "@/lib/routine-view";
+import { filterSuspendedRoutines } from "@/lib/suspensions";
 import type {
   SectionRow,
   ClassRow,
@@ -138,7 +139,8 @@ export async function GET(req: NextRequest) {
   const sections = (secRes.data ?? []) as SectionRow[];
   const subjects = (subRes.data ?? []) as SubjectRow[];
   const rooms = (roomRes.data ?? []) as RoomRow[];
-  const routines = allRoutines;
+  // A suspended class does not run, so it must not appear on the teacher's PDF.
+  const routines = filterSuspendedRoutines(allRoutines, sections, classes);
   const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
   const season = ((seasonRes.data?.value as Season) ?? "summer") as Season;
 

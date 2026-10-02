@@ -130,6 +130,8 @@ async function getSectionRoutine(sectionId: string) {
   const rooms = new Map(((roomsRes.data ?? []) as RoomRow[]).map((r) => [r.id, r]));
   const cls = ((classesRes.data ?? []) as ClassRow[]).find((c) => c.id === section.class_id);
   const label = cls ? `${cls.name} — Section ${section.name}` : `Section ${section.name}`;
+  const suspended = cls?.is_suspended ?? false;
+  const suspensionReason = cls?.suspension_reason ?? null;
 
   const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
 
@@ -215,7 +217,7 @@ async function getSectionRoutine(sectionId: string) {
     };
   }
 
-  return { label, matrix };
+  return { label, matrix, suspended, suspensionReason };
 }
 
 export async function GET(req: NextRequest) {
@@ -232,13 +234,27 @@ export async function GET(req: NextRequest) {
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const { label, matrix } = data;
+  const { label, matrix, suspended, suspensionReason } = data;
 
   const PDFDoc = (
     <Document>
       <Page size="A4" orientation="landscape" style={styles.page}>
         <Text style={styles.header}>{SCHOOL_NAME_DEFAULT}</Text>
         <Text style={styles.subheader}>Weekly Class Routine — {label} (Summer)</Text>
+        {suspended && (
+          <Text
+            style={{
+              textAlign: "center",
+              marginBottom: 12,
+              fontSize: 10,
+              fontWeight: "bold",
+              color: "#b91c1c",
+            }}
+          >
+            SUSPENDED — routine shown for reference
+            {suspensionReason ? ` (${suspensionReason})` : ""}
+          </Text>
+        )}
         <View style={styles.table}>
           <View style={styles.row}>
             <View style={styles.dayCell}>

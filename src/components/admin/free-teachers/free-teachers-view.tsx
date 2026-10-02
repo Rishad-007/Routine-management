@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Users, Info, Eye } from "lucide-react";
+import { Search, Users, Info, Eye, Ban } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -54,6 +54,8 @@ interface Props {
   totalTeachers: number;
   /** Some substitution is in effect on the selected weekday. */
   adjustedToday: boolean;
+  /** Classes currently suspended — their teachers are counted as free. */
+  suspendedClasses: { name: string; reason: string | null }[];
   subjectLabels: Record<string, string>;
   roomLabels: Record<string, string>;
   routineSectionLabels: Record<string, string>;
@@ -67,6 +69,7 @@ export function FreeTeachersView({
   periods,
   totalTeachers,
   adjustedToday,
+  suspendedClasses,
   subjectLabels,
   roomLabels,
   routineSectionLabels,
@@ -146,6 +149,23 @@ export function FreeTeachersView({
           </button>
         ))}
       </div>
+
+      {suspendedClasses.length > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <Ban className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            <span className="font-semibold">
+              {suspendedClasses.map((c) => c.name).join(", ")}
+            </span>{" "}
+            {suspendedClasses.length === 1 ? "is" : "are"} suspended, so their
+            teachers are counted as free and can cover other classes.
+            {suspendedClasses
+              .filter((c) => c.reason)
+              .map((c) => `${c.name}: ${c.reason}`)
+              .join(" · ")}
+          </span>
+        </div>
+      )}
 
       {adjustedToday && (
         <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

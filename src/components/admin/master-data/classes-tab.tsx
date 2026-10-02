@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Check, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, X, Ban, RotateCcw } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -21,7 +21,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { createClass, updateClass, deleteClass } from "@/app/admin/master-data/actions";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  createClass,
+  updateClass,
+  deleteClass,
+  setClassSuspension,
+} from "@/app/admin/master-data/actions";
 import type { ClassRow } from "@/lib/types";
 
 export function ClassesTab({ classes }: { classes: ClassRow[] }) {
@@ -32,6 +45,37 @@ export function ClassesTab({ classes }: { classes: ClassRow[] }) {
   const [editName, setEditName] = useState("");
   const [editSort, setEditSort] = useState(0);
   const [deleting, setDeleting] = useState<ClassRow | null>(null);
+  const [suspending, setSuspending] = useState<ClassRow | null>(null);
+  const [suspendReason, setSuspendReason] = useState("");
+
+  function openSuspend(c: ClassRow) {
+    setSuspending(c);
+    setSuspendReason(c.suspension_reason ?? "");
+  }
+
+  function handleSuspend() {
+    if (!suspending) return;
+    startTransition(async () => {
+      const res = await setClassSuspension(
+        suspending.id,
+        true,
+        suspendReason,
+      );
+      if (res?.error) toast.error(res.error);
+      else {
+        toast.success(`${suspending.name} suspended`);
+        setSuspending(null);
+      }
+    });
+  }
+
+  function handleResume(c: ClassRow) {
+    startTransition(async () => {
+      const res = await setClassSuspension(c.id, false, "");
+      if (res?.error) toast.error(res.error);
+      else toast.success(`${c.name} resumed`);
+    });
+  }
 
   function handleCreate() {
     startTransition(async () => {
@@ -95,7 +139,14 @@ export function ClassesTab({ classes }: { classes: ClassRow[] }) {
 
         <div className="space-y-2">
           {classes.map((c) => (
-            <div key={c.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
+            <div
+              key={c.id}
+              className={
+                c.is_suspended
+                  ? "flex items-center justify-between rounded-lg border border-red-200 bg-red-50/60 px-3 py-2"
+                  : "flex items-center justify-between rounded-lg border px-3 py-2"
+              }
+            >
               {editing?.id === c.id ? (
                 <div className="flex flex-1 flex-wrap items-center gap-2">
                   <Input
@@ -118,11 +169,46 @@ export function ClassesTab({ classes }: { classes: ClassRow[] }) {
                 </div>
               ) : (
                 <>
-                  <div>
-                    <p className="font-medium text-[#1e3a5f]">{c.name}</p>
-                    <p className="text-xs text-slate-500">Order: {c.sort_order}</p>
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-2 font-medium text-[#1e3a5f]">
+                      {c.name}
+                      {c.is_suspended && (
+                        <span className="inline-flex items-center gap-1 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                          <Ban className="h-3 w-3" /> Suspended
+                        </span>
+                      )}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">
+                      Order: {c.sort_order}
+                      {c.is_suspended && c.suspension_reason
+                        ? ` · ${c.suspension_reason}`
+                        : ""}
+                    </p>
                   </div>
                   <div className="flex gap-1">
+                    {c.is_suspended ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={pending}
+                        onClick={() => handleResume(c)}
+                        className="text-teal-700 hover:bg-teal-50"
+                        title={`Resume ${c.name}`}
+                      >
+                        <RotateCcw className="h-4 w-4" /> Resume
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={pending}
+                        onClick={() => openSuspend(c)}
+                        className="text-red-600 hover:bg-red-50"
+                        title={`Suspend ${c.name}`}
+                      >
+                        <Ban className="h-4 w-4" /> Suspend
+                      </Button>
+                    )}
                     <Button
                       size="icon"
                       variant="ghost"
@@ -164,6 +250,45 @@ export function ClassesTab({ classes }: { classes: ClassRow[] }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={!!suspending}
+        onOpenChange={(o) => !o && setSuspending(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Suspend {suspending?.name}?</DialogTitle>
+            <DialogDescription>
+              Every section of this class stops running. Its teachers are freed
+              and appear as available in Free Teachers and Adjust. The weekly
+              routine is kept, so resuming restores it untouched.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-slate-500" htmlFor="suspension-reason">
+              Reason (optional)
+            </label>
+            <Input
+              id="suspension-reason"
+              placeholder="e.g. Course complete / exams done"
+              value={suspendReason}
+              onChange={(e) => setSuspendReason(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setSuspending(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSuspend}
+              disabled={pending}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              <Ban className="h-4 w-4" /> Suspend class
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

@@ -199,6 +199,10 @@ export function AdjustBuilder({
   const [pendingRed, setPendingRed] = useState<{
     adjustment: PeriodAdjustment;
     reasons: string[];
+    // "assign": the change is NOT yet in overrides (a red pick), so confirmRed
+    // must pass it to handleSave explicitly. "save": the change came from an
+    // existing override list, so re-saving already includes it.
+    source: "assign" | "save";
   } | null>(null);
   const [pendingYellow, setPendingYellow] = useState<{
     detail: string;
@@ -814,6 +818,7 @@ export function AdjustBuilder({
           reasons: sim.reasons,
         },
         reasons: sim.reasons,
+        source: "assign",
       });
       return;
     }
@@ -892,6 +897,7 @@ export function AdjustBuilder({
           reasons: sim.reasons,
         },
         reasons: sim.reasons,
+        source: "assign",
       });
       return;
     }
@@ -913,12 +919,13 @@ export function AdjustBuilder({
 
   const confirmRed = () => {
     if (!pendingRed) return;
+    // A red PICK was never staged in overrides, so hand it to handleSave
+    // explicitly; a red warning from a previous save is already in overrides.
+    const extra = pendingRed.source === "assign" ? [pendingRed.adjustment] : [];
     setPendingRed(null);
     setPendingYellow(null);
     setSheetOpen(false);
-    // The overrides are still in state — re-save immediately with force=true
-    // so the red-level assignment is actually persisted.
-    handleSave(true);
+    handleSave(true, extra);
   };
 
   const resetCell = (period: number) => {
@@ -995,7 +1002,10 @@ export function AdjustBuilder({
     router.refresh();
   };
 
-  const handleSave = async (force = false) => {
+  const handleSave = async (
+    force = false,
+    extraChanges: PeriodAdjustment[] = [],
+  ) => {
     if (!selectedTeacherId || dayIndex === null) {
       toast.error("Select a teacher and a school day first.");
       return;
@@ -1043,14 +1053,25 @@ export function AdjustBuilder({
       });
     }
 
+    // A force-confirmed red PICK isn't in the override maps, so it arrives here.
+    // Dedupe by (section, period, role) keeping the LAST writer, so re-picking
+    // over an already-staged period never sends two rows for the same key (the
+    // DB upsert would reject that as "cannot affect row a second time").
+    changes.push(...extraChanges);
+    const byKey = new Map<string, PeriodAdjustment>();
+    for (const c of changes) {
+      byKey.set(`${c.sectionId}:${c.period}:${c.isTag}`, c);
+    }
+    const deduped = [...byKey.values()];
+
     // No actual substitutions to persist — bail out early with clear feedback.
-    if (changes.length === 0) {
+    if (deduped.length === 0) {
       setSaving(false);
       toast.error("No changes to save.");
       return;
     }
 
-    const res = await saveAllAdjustments(date, changes, force);
+    const res = await saveAllAdjustments(date, deduped, force);
     setSaving(false);
     setPendingYellow(null);
 
@@ -1063,8 +1084,9 @@ export function AdjustBuilder({
       const hasRed = res.warnings.some((w) => w.level === "red");
       if (hasRed) {
         setPendingRed({
-          adjustment: changes[0],
+          adjustment: deduped[0],
           reasons: res.warnings.flatMap((w) => w.reasons),
+          source: "save",
         });
         return;
       }

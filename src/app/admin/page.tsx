@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  Ban,
   BellRing,
   CalendarClock,
   CalendarX2,
@@ -38,6 +39,11 @@ import {
   getTeachers,
 } from "@/lib/data";
 import { weeklyLoad } from "@/lib/conflicts";
+import {
+  filterSuspendedAdjustments,
+  filterSuspendedRoutines,
+  suspendedClassIdSet,
+} from "@/lib/suspensions";
 import { getReportRange } from "@/lib/report-range";
 import {
   getCurrentPeriod,
@@ -133,7 +139,16 @@ export default async function AdminDashboardPage() {
   const todayStr = getTodayLocal();
   const now = new Date();
   const dayIndex = getSchoolDayIndex(now);
-  const todayAdjustments = adjustments.filter((a) => a.adjust_date === todayStr);
+
+  // Suspension is a live overlay. Excluding suspended classes keeps workload,
+  // coverage and room figures honest — a freed teacher is not teaching.
+  const suspendedClasses = suspendedClassIdSet(classes);
+  const liveRoutines = filterSuspendedRoutines(routines, sections, classes);
+  const todayAdjustments = filterSuspendedAdjustments(
+    adjustments.filter((a) => a.adjust_date === todayStr),
+    sections,
+    classes,
+  );
 
   const weekRange = getReportRange("week", todayStr);
   const weekAdjustments = allAdjustments.filter(
@@ -156,9 +171,12 @@ export default async function AdminDashboardPage() {
   const sectionMap = new Map(sections.map((s) => [s.id, s]));
   const classMap = new Map(classes.map((c) => [c.id, c]));
 
-  const totalCells = sections.length * DAY_ORDER.length * 7;
+  const activeSections = sections.filter(
+    (s) => !suspendedClasses.has(s.class_id),
+  );
+  const totalCells = activeSections.length * DAY_ORDER.length * 7;
   const filledPrimary = new Set(
-    routines
+    liveRoutines
       .filter((r) => !r.is_tag)
       .map((r) => `${r.section_id}:${r.day}:${r.period_number}`)
   ).size;
@@ -167,7 +185,7 @@ export default async function AdminDashboardPage() {
 
   const workloadData = teachers
     .map((t) => {
-      const periods = weeklyLoad(routines, t.id).total;
+      const periods = weeklyLoad(liveRoutines, t.id).total;
       return {
         id: t.id,
         name: t.full_name,
@@ -183,7 +201,7 @@ export default async function AdminDashboardPage() {
   };
 
   const todayRoomIds = new Set(
-    routines
+    liveRoutines
       .filter((r) => !r.is_tag && r.day === dayIndex && r.room_id)
       .map((r) => r.room_id as string)
   );
@@ -305,6 +323,23 @@ export default async function AdminDashboardPage() {
           </div>
         </div>
       </div>
+
+      {classes.some((c) => c.is_suspended) && (
+        <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <Ban className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            <span className="font-semibold">
+              Suspended:{" "}
+              {classes
+                .filter((c) => c.is_suspended)
+                .map((c) => c.name)
+                .join(", ")}
+            </span>{" "}
+            — their teachers are free to cover other classes. Resume from Update
+            Database.
+          </span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {stats.map((s, i) => (

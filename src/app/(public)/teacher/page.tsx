@@ -9,6 +9,7 @@ import {
   getAdjustmentsForWeek,
 } from "@/lib/data";
 import { buildTeacherMatrix, buildWeekOverrides } from "@/lib/routine-view";
+import { filterSuspendedRoutines } from "@/lib/suspensions";
 import { getSchoolWeekRange } from "@/lib/periods";
 import type { Season } from "@/lib/constants";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
@@ -54,11 +55,15 @@ export default async function TeacherPage({
   );
   const todayTagOverrides = buildWeekOverrides(adjustments, week.start, true);
 
+  // A suspended class does not run, so its teachers are genuinely free and the
+  // suspended class must not appear on their weekly routine.
+  const liveRoutines = filterSuspendedRoutines(routines, sections, classes);
+
   const matrices: Record<string, RoutineMatrix> = {};
   const teacherMeta: Record<string, { name: string; code: string }> = {};
   for (const t of teachers) {
     matrices[t.id] = buildTeacherMatrix(
-      routines,
+      liveRoutines,
       t.id,
       sections,
       classes,

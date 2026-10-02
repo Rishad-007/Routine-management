@@ -15,6 +15,8 @@ export interface ClassRow {
   id: string;
   name: string;
   sort_order: number;
+  is_suspended: boolean;
+  suspension_reason: string | null;
 }
 
 export interface ClassPeriodRuleRow {

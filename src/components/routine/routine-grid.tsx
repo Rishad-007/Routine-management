@@ -30,6 +30,8 @@ interface RoutineGridProps {
   season: Season;
   highlightCurrent?: boolean;
   variant?: "default" | "compact";
+  /** Class is suspended: grey the grid and suppress the live highlight. */
+  suspended?: boolean;
 }
 
 export function RoutineGrid({
@@ -37,14 +39,17 @@ export function RoutineGrid({
   season,
   highlightCurrent = true,
   variant = "default",
+  suspended = false,
 }: RoutineGridProps) {
   const { result, dayIndex } = useCurrentPeriod(season);
-  const highlightDay = highlightCurrent ? dayIndex : null;
+  const highlightDay = highlightCurrent && !suspended ? dayIndex : null;
   const highlightPeriod =
-    highlightCurrent && result.kind === "period" ? (result.periodNumber ?? null) : null;
+    highlightCurrent && !suspended && result.kind === "period"
+      ? (result.periodNumber ?? null)
+      : null;
 
   return (
-    <div className="overflow-x-auto">
+    <div className={cn("overflow-x-auto", suspended && "opacity-60 grayscale")}>
       <table className="w-full min-w-[760px] border-collapse text-sm">
         <thead>
           <tr>

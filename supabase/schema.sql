@@ -62,10 +62,16 @@ create table admins (
 );
 
 -- ---------- CLASSES ----------
+-- A class can be suspended globally (course complete, exams done, etc.).
+-- Suspension is a LIVE overlay: the weekly routine is preserved, but every
+-- live surface (free teachers, adjustments, public views) ignores the
+-- suspended class's slots, which frees its teachers for other classes.
 create table classes (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  sort_order int not null default 0
+  sort_order int not null default 0,
+  is_suspended boolean not null default false,
+  suspension_reason text
 );
 
 -- ---------- CLASS PERIOD RULES ----------
@@ -319,13 +325,19 @@ begin
     raise exception 'Cannot adjust on a non-school day.';
   end if;
 
+  -- A teacher holding a SUSPENDED class is genuinely free, so that slot must
+  -- not block a substitution elsewhere. Join through sections -> classes and
+  -- ignore suspended classes.
   select ra.id into conflict
     from routine_assignments ra
     join routine_slots rs on rs.id = ra.slot_id
+    join sections sec on sec.id = rs.section_id
+    join classes c on c.id = sec.class_id
    where ra.teacher_id = new.new_teacher_id
      and rs.day = slot_day
      and rs.period_number = new.period_number
      and rs.section_id <> adjustment_section
+     and c.is_suspended = false
    limit 1;
 
   if found then
@@ -334,13 +346,18 @@ begin
       new.new_teacher_id;
   end if;
 
+  -- Same for a substitute already used elsewhere on this date: a cover for a
+  -- now-suspended class no longer counts as occupied.
   select aa.id into conflict
     from adjustment_assignments aa
     join adjustment_batches ab on ab.id = aa.batch_id
+    join sections sec on sec.id = ab.section_id
+    join classes c on c.id = sec.class_id
    where ab.adjust_date = adjustment_date
      and aa.new_teacher_id = new.new_teacher_id
      and aa.period_number = new.period_number
      and aa.id <> new.id
+     and c.is_suspended = false
    limit 1;
 
   if found then

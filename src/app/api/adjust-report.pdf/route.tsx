@@ -5,11 +5,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT } from "@/lib/constants";
 import { getSchoolDayIndex } from "@/lib/periods";
 import { fetchAllRows, type PagedQuery } from "@/lib/data";
+import {
+  filterSuspendedAdjustments,
+  filterSuspendedRoutines,
+} from "@/lib/suspensions";
 import type {
   SectionRow,
   ClassRow,
   TeacherRow,
   SubjectRow,
+  RoomRow,
   RoutineRow,
   AdjustmentRow,
 } from "@/lib/types";
@@ -85,10 +90,10 @@ const styles = StyleSheet.create({
     color: "#334155",
     textAlign: "center",
   },
-  clsCol: { width: "24%" },
+  clsCol: { width: "28%" },
   perCol: { width: "10%" },
-  subCol: { width: "24%" },
-  teaCol: { width: "24%" },
+  subCol: { width: "22%" },
+  teaCol: { width: "22%" },
   sigCol: { width: "18%" },
   footer: {
     marginTop: 6,
@@ -126,12 +131,13 @@ async function fetchReportData(date: string) {
 
   // One weekday of `routines` is ~600 rows today and grows with the section
   // count — page it so the report never silently loses periods.
-  const [clsRes, secRes, teaRes, subRes, adjRes, dayRoutines] =
+  const [clsRes, secRes, teaRes, subRes, roomRes, adjRes, dayRoutines] =
     await Promise.all([
       admin.from("classes").select("*").order("sort_order", { ascending: true }),
       admin.from("sections").select("*"),
       admin.from("teachers").select("*").order("full_name"),
       admin.from("subjects").select("*"),
+      admin.from("rooms").select("*"),
       admin.from("adjustments").select("*").eq("adjust_date", date),
       fetchAllRows<RoutineRow>(
         () =>
@@ -146,13 +152,20 @@ async function fetchReportData(date: string) {
   const sections = (secRes.data ?? []) as SectionRow[];
   const teachers = (teaRes.data ?? []) as TeacherRow[];
   const subjects = (subRes.data ?? []) as SubjectRow[];
-  const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
-  const routines = dayRoutines;
+  const rooms = (roomRes.data ?? []) as RoomRow[];
+  // Suspended classes are not running, so their substitutions are moot.
+  const adjustments = filterSuspendedAdjustments(
+    (adjRes.data ?? []) as AdjustmentRow[],
+    sections,
+    classes,
+  );
+  const routines = filterSuspendedRoutines(dayRoutines, sections, classes);
 
   const cls = new Map(classes.map((c) => [c.id, c]));
   const sec = new Map(sections.map((s) => [s.id, s]));
   const tch = new Map(teachers.map((t) => [t.id, t]));
   const sub = new Map(subjects.map((s) => [s.id, s]));
+  const room = new Map(rooms.map((r) => [r.id, r]));
 
   // Base routine subject fallback keyed by section:period:isTag
   const base = new Map<string, RoutineRow>();
@@ -165,9 +178,13 @@ async function fetchReportData(date: string) {
     adjustments.map((a) => {
       const section = sec.get(a.section_id);
       const classRow = section ? cls.get(section.class_id) : undefined;
+      // The section's fixed room, e.g. "Class 9-Dhalia (R-295)".
+      const roomName = section?.room_id
+        ? room.get(section.room_id)?.name
+        : undefined;
       const label =
         classRow && section
-          ? `${classRow.name}-${section.name}`
+          ? `${classRow.name}-${section.name}${roomName ? ` (${roomName})` : ""}`
           : section?.name ?? "—";
 
       const baseRow = base.get(

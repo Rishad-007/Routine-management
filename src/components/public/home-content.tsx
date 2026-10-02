@@ -81,6 +81,8 @@ export function HomeContent({
 
   const currentCell = useMemo(() => {
     if (!sectionId || result.kind !== "period" || dayIndex === null) return undefined;
+    // A suspended class is not running right now.
+    if (classes.find((c) => c.id === classId)?.is_suspended) return undefined;
     const r = routines.find(
       (x) =>
         x.section_id === sectionId &&
@@ -109,7 +111,7 @@ export function HomeContent({
       room: r.room_id ? "Room" : undefined,
       isAdjusted: !!adj,
     };
-  }, [sectionId, routines, teachers, subjects, result, dayIndex, adjustments, today]);
+  }, [sectionId, classId, classes, routines, teachers, subjects, result, dayIndex, adjustments, today]);
 
   const isWeekend = dayIndex === null;
   const activePeriod = result.kind === "period" ? result.periodNumber : null;
@@ -166,6 +168,16 @@ export function HomeContent({
                 ))}
               </SelectContent>
             </Select>
+            {classId &&
+              classes.find((c) => c.id === classId)?.is_suspended && (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  This class is currently suspended
+                  {classes.find((c) => c.id === classId)?.suspension_reason
+                    ? ` — ${classes.find((c) => c.id === classId)?.suspension_reason}`
+                    : ""}
+                  .
+                </p>
+              )}
             {sectionId && (
               <Link
                 href={`/routine?section=${sectionId}`}

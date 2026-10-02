@@ -78,6 +78,47 @@ export async function deleteClass(id: string) {
   return { success: true };
 }
 
+/**
+ * Suspend or resume an entire class.
+ *
+ * Suspension does NOT touch the weekly routine: it is a live overlay, so every
+ * live surface (free teachers, adjustments, public views) re-derives itself from
+ * this flag and the suspended class's teachers immediately read as free.
+ */
+export async function setClassSuspension(
+  id: string,
+  suspended: boolean,
+  reason: string,
+) {
+  const { admin } = await authed();
+  if (!id) return { error: "Class is required." };
+
+  const { error } = await admin
+    .from("classes")
+    .update({
+      is_suspended: suspended,
+      suspension_reason: suspended ? reason.trim() || null : null,
+    })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  // Suspension changes the derived free/busy split, so every routine surface
+  // and both caches must be dropped — not just the master-data tabs.
+  revalidatePath("/admin/master-data");
+  revalidatePath("/admin");
+  revalidatePath("/admin/free-teachers");
+  revalidatePath("/admin/adjust");
+  revalidatePath("/admin/routine");
+  revalidatePath("/admin/assign");
+  revalidatePath("/");
+  revalidatePath("/routine");
+  revalidatePath("/teacher");
+  invalidateMasterDataTags();
+  revalidateTag("routines");
+  revalidateTag("adjustments");
+  return { success: true };
+}
+
 // ---------------- Sections ----------------
 
 /**

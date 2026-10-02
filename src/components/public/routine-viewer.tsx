@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Download, Loader2 } from "lucide-react";
+import { Ban, Download, Loader2 } from "lucide-react";
 import { FadeIn } from "@/components/motion/fade-in";
 import {
   Select,
@@ -22,6 +22,10 @@ interface Props {
   initialClassId?: string;
   matrices: Record<string, RoutineMatrix>;
   season: Season;
+  /** Ids of classes currently suspended (their grid is shown greyed). */
+  suspendedClassIds?: string[];
+  /** classId -> reason, for the suspension banner. */
+  suspensionReasons?: Record<string, string>;
 }
 
 export function RoutineViewer({
@@ -31,6 +35,8 @@ export function RoutineViewer({
   initialClassId,
   matrices,
   season,
+  suspendedClassIds = [],
+  suspensionReasons = {},
 }: Props) {
   const [classId, setClassId] = useState<string>(
     initialClassId ||
@@ -42,6 +48,8 @@ export function RoutineViewer({
   const [pdfLoading, setPdfLoading] = useState(false);
   const classSections = sections.filter((s) => s.class_id === classId);
   const matrix = sectionId ? matrices[sectionId] : undefined;
+  const classSuspended = !!classId && suspendedClassIds.includes(classId);
+  const suspensionReason = classId ? suspensionReasons[classId] : undefined;
 
   const downloadPdf = () => {
     if (!sectionId) return;
@@ -122,7 +130,20 @@ export function RoutineViewer({
             </button>
           </CardHeader>
           <CardContent className="pt-0">
-            <RoutineGrid matrix={matrix} season={season} />
+            {classSuspended && (
+              <div className="mb-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                <Ban className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  <span className="font-semibold">
+                    This class is currently suspended.
+                  </span>{" "}
+                  The routine below is kept for reference and will resume once
+                  the suspension is lifted.
+                  {suspensionReason ? ` Reason: ${suspensionReason}` : ""}
+                </span>
+              </div>
+            )}
+            <RoutineGrid matrix={matrix} season={season} suspended={classSuspended} />
           </CardContent>
         </Card>
       ) : (

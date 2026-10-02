@@ -14,6 +14,11 @@ import {
   getSections,
   type PagedQuery,
 } from "@/lib/data";
+import {
+  filterSuspendedAdjustments,
+  filterSuspendedRoutines,
+  suspendedSectionIdSet,
+} from "@/lib/suspensions";
 import { getSchoolDayIndex, resolveAdjustDate } from "@/lib/periods";
 import { DAY_LABELS, type AdjustmentRow, type RoutineRow } from "@/lib/types";
 
@@ -216,14 +221,32 @@ export async function saveAllAdjustments(
     return { error: e instanceof Error ? e.message : "Could not load routines." };
   }
 
+  // Suspension is a live overlay: a suspended class's base slots must not block
+  // a freed teacher from covering another class. Fetch the master data needed
+  // to map each routine row's section to its class.
+  const [classes, sections] = await Promise.all([getClasses(), getSections()]);
+  const suspendedSections = suspendedSectionIdSet(sections, classes);
+  if (changes.some((c) => suspendedSections.has(c.sectionId))) {
+    return {
+      error:
+        "That section belongs to a suspended class. Resume the class before adjusting it.",
+    };
+  }
+  const liveRoutines = filterSuspendedRoutines(allRoutines, sections, classes);
+  const liveDateAdjustments = filterSuspendedAdjustments(
+    dateAdjustments,
+    sections,
+    classes,
+  );
+
   // Scope the overlay to this weekday: applyAdjustmentsToRoutines keys on
   // section+period+is_tag only, so feeding it the whole week would rewrite the
   // same section/period on every other day too.
   const routines = [
-    ...allRoutines.filter((r) => r.day !== dayIndex),
+    ...liveRoutines.filter((r) => r.day !== dayIndex),
     ...applyAdjustmentsToRoutines(
-      allRoutines.filter((r) => r.day === dayIndex),
-      dateAdjustments,
+      liveRoutines.filter((r) => r.day === dayIndex),
+      liveDateAdjustments,
       effectiveDate,
     ),
   ];

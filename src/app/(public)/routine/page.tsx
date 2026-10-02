@@ -9,6 +9,10 @@ import {
   getAdjustmentsForWeek,
 } from "@/lib/data";
 import { buildSectionMatrix, buildWeekOverrides } from "@/lib/routine-view";
+import {
+  suspendedClassIdSet,
+  suspendedClassReasons,
+} from "@/lib/suspensions";
 import { getSchoolWeekRange } from "@/lib/periods";
 import type { Season } from "@/lib/constants";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
@@ -73,6 +77,8 @@ export default async function RoutinePage({
         initialClassId={params.class}
         matrices={matrices}
         season={(season as Season) ?? "summer"}
+        suspendedClassIds={[...suspendedClassIdSet(classes)]}
+        suspensionReasons={Object.fromEntries(suspendedClassReasons(classes))}
       />
     </div>
   );
