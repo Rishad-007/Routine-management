@@ -25,7 +25,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { CurrentPeriodCard } from "./current-period-card";
+import { NowTeachingBoard } from "./now-teaching-board";
 import { FadeIn } from "@/components/motion/fade-in";
 import { useCurrentPeriod } from "@/hooks/use-current-period";
 import { buildSchedule } from "@/lib/periods";
@@ -37,6 +37,7 @@ import type {
   SectionRow,
   TeacherRow,
   SubjectRow,
+  RoomRow,
   RoutineRow,
   AdjustmentRow,
 } from "@/lib/types";
@@ -46,7 +47,9 @@ interface Props {
   sections: SectionRow[];
   teachers: TeacherRow[];
   subjects: SubjectRow[];
-  routines: RoutineRow[];
+  rooms: RoomRow[];
+  /** Routine rows for today only, every period. */
+  todayRows: RoutineRow[];
   adjustments: AdjustmentRow[];
   season: Season;
   today: string;
@@ -66,7 +69,8 @@ export function HomeContent({
   sections,
   teachers,
   subjects,
-  routines,
+  rooms,
+  todayRows,
   adjustments,
   season,
   today,
@@ -78,40 +82,6 @@ export function HomeContent({
   const { result, dayIndex, now } = useCurrentPeriod(season);
 
   const schedule = useMemo(() => buildSchedule(season, now), [season, now]);
-
-  const currentCell = useMemo(() => {
-    if (!sectionId || result.kind !== "period" || dayIndex === null) return undefined;
-    // A suspended class is not running right now.
-    if (classes.find((c) => c.id === classId)?.is_suspended) return undefined;
-    const r = routines.find(
-      (x) =>
-        x.section_id === sectionId &&
-        x.day === dayIndex &&
-        x.period_number === result.periodNumber &&
-        !x.is_tag
-    );
-    if (!r) return undefined;
-
-    const adj = adjustments.find(
-      (a) =>
-        a.adjust_date === today &&
-        a.section_id === r.section_id &&
-        a.period_number === result.periodNumber &&
-        !a.is_tag
-    );
-
-    const teacherId = adj?.new_teacher_id ?? r.teacher_id;
-    const subjectId = adj?.new_subject_id ?? r.subject_id;
-
-    const t = teachers.find((x) => x.id === teacherId);
-    const s = subjects.find((x) => x.id === subjectId);
-    return {
-      subject: s?.name,
-      teacher: t?.full_name,
-      room: r.room_id ? "Room" : undefined,
-      isAdjusted: !!adj,
-    };
-  }, [sectionId, classId, classes, routines, teachers, subjects, result, dayIndex, adjustments, today]);
 
   const isWeekend = dayIndex === null;
   const activePeriod = result.kind === "period" ? result.periodNumber : null;
@@ -129,18 +99,30 @@ export function HomeContent({
           Weekly Class Routine
         </h1>
         <p className="mx-auto mt-2 max-w-2xl text-slate-500">
-          The class-wise schedule for Sunday through Thursday, with a live panel
-          that shows what is running right now.
+          The class-wise schedule for Sunday through Thursday, with a live board
+          showing which teacher is teaching which class right now.
         </p>
       </section>
       </FadeIn>
 
-      {/* Live card + quick picker */}
+      {/* Live board */}
       <FadeIn stagger={0.08}>
+        <NowTeachingBoard
+          classes={classes}
+          sections={sections}
+          teachers={teachers}
+          subjects={subjects}
+          rooms={rooms}
+          todayRows={todayRows}
+          adjustments={adjustments}
+          season={season}
+          today={today}
+        />
+      </FadeIn>
+
+      {/* Today's schedule + school hours */}
+      <FadeIn stagger={0.14}>
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <CurrentPeriodCard season={season} currentCell={currentCell} />
-        </div>
         <Card className="bg-white/70">
           <CardHeader>
             <CardTitle className="text-base text-[#1e3a5f]">
@@ -271,55 +253,34 @@ export function HomeContent({
               School Hours
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {season === "summer" ? (
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/10">
-                  <Sun className="h-5 w-5 text-amber-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">
-                    Summer schedule
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Starts {schedule[0]?.startLabel} · Ends{" "}
-                    {schedule[schedule.length - 1]?.endLabel}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-500/10">
-                  <Moon className="h-5 w-5 text-slate-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">
-                    Winter schedule
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Starts {schedule[0]?.startLabel} · Ends{" "}
-                    {schedule[schedule.length - 1]?.endLabel}
-                  </p>
-                </div>
-              </div>
-            )}
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0d9488]/10">
-                <Coffee className="h-5 w-5 text-teal-600" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-700">
-                  Tiffin break
-                </p>
-                <p className="text-xs text-slate-500">
-                  After period {TIFFIN_AFTER_PERIOD}, 20 minutes
-                </p>
-              </div>
-            </div>
-            <p className="rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-500">
-              School runs from Sunday to Thursday. Friday and Saturday are
-              weekly holidays.
-            </p>
+          <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <span className="flex items-center gap-2 text-sm text-slate-600">
+              {season === "summer" ? (
+                <Sun className="h-4 w-4 text-amber-600" />
+              ) : (
+                <Moon className="h-4 w-4 text-slate-600" />
+              )}
+              <span>
+                <span className="font-medium text-slate-700">
+                  {schedule[0]?.startLabel}
+                </span>
+                {" – "}
+                <span className="font-medium text-slate-700">
+                  {schedule[schedule.length - 1]?.endLabel}
+                </span>
+                <span className="text-xs text-slate-500">
+                  {" "}
+                  · {season === "summer" ? "Summer" : "Winter"}
+                </span>
+              </span>
+            </span>
+            <span className="flex items-center gap-2 text-sm text-slate-600">
+              <Coffee className="h-4 w-4 text-teal-600" />
+              Tiffin after P{TIFFIN_AFTER_PERIOD}
+            </span>
+            <span className="text-xs text-slate-500">
+              Sunday – Thursday · Fri &amp; Sat are holidays
+            </span>
           </CardContent>
         </Card>
       </div>
