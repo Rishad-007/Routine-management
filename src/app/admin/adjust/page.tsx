@@ -9,7 +9,7 @@ import {
   getAllAdjustments,
   getClassPeriodRules,
 } from "@/lib/data";
-import { getTodayLocal } from "@/lib/periods";
+import { getSchoolToday } from "@/lib/periods";
 import { filterSuspendedRoutines } from "@/lib/suspensions";
 import { Ban } from "lucide-react";
 import { AdjustBuilder } from "@/components/admin/adjust/adjust-builder";
@@ -68,7 +68,7 @@ export default async function AdminAdjustPage() {
         routines={liveRoutines}
         adjustments={adjustments}
         teacherSubjects={teacherSubjects}
-        initialDate={getTodayLocal()}
+        initialDate={getSchoolToday()}
         rules={classPeriodRules}
       />
     </div>

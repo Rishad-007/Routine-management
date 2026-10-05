@@ -23,7 +23,7 @@ import {
   filterSuspendedRoutines,
   suspendedClassIdSet,
 } from "@/lib/suspensions";
-import { getSchoolDayIndex, getSchoolWeekRange } from "@/lib/periods";
+import { getSchoolDayIndexNow, getSchoolWeekRange } from "@/lib/periods";
 import { DAY_ORDER, PERIOD_ORDER } from "@/lib/constants";
 import { DAY_LABELS } from "@/lib/types";
 import type { RoutinePreviewSourceRow } from "@/lib/teacher-routine-preview";
@@ -43,7 +43,7 @@ export default async function FreeTeachersPage({
   await requireAdmin();
   const params = await searchParams;
 
-  const todayIndex = getSchoolDayIndex(new Date());
+  const todayIndex = getSchoolDayIndexNow();
   const requested = Number(params.day);
   const day =
     DAY_ORDER.includes(requested) ? requested : (todayIndex ?? DAY_ORDER[0]);

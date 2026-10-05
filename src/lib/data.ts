@@ -1,7 +1,7 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
 import { createAdminClient } from "./supabase/admin";
-import { getSchoolWeekRange, getTodayLocal } from "./periods";
+import { getSchoolWeekRange } from "./periods";
 import {
   type ClassRow,
   type ClassPeriodRuleRow,
@@ -205,13 +205,21 @@ export const getRoutines = unstable_cache(
   { tags: ["routines"], revalidate: CACHE_SECONDS },
 );
 
+/**
+ * Adjustments from `from` (YYYY-MM-DD) onwards.
+ *
+ * `from` is a parameter rather than an internal `getSchoolToday()` call on
+ * purpose: `unstable_cache` keys on its arguments, so passing the date in means
+ * the `>= from` cutoff rolls over at midnight instead of being frozen into a
+ * date-less entry. Otherwise a cached value filled before midnight keeps
+ * serving yesterday's covers all day.
+ */
 export const getAdjustments = unstable_cache(
-  async (): Promise<AdjustmentRow[]> => {
-    const today = getTodayLocal();
+  async (from: string): Promise<AdjustmentRow[]> => {
     const { data, error } = await db()
       .from("adjustments")
       .select("*")
-      .gte("adjust_date", today);
+      .gte("adjust_date", from);
     if (error) throw new Error(error.message);
     return (data as AdjustmentRow[]) ?? [];
   },

@@ -9,10 +9,15 @@ import {
   getSetting,
 } from "@/lib/data";
 import type { Season } from "@/lib/constants";
-import { getSchoolDayIndex, getTodayLocal } from "@/lib/periods";
+import { getSchoolDayIndexNow, getSchoolToday } from "@/lib/periods";
 import { HomeContent } from "@/components/public/home-content";
 
-export const revalidate = 60;
+// The board's contents depend on the current day and period, so an ISR snapshot
+// is the wrong shape for this route: a payload rendered at 23:59 would keep
+// serving yesterday's routine past midnight. Force-dynamic costs no extra
+// database work — every getter below is already `unstable_cache`d — and it
+// matches how /admin is already configured.
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const [classes, sections, teachers, subjects, rooms, routines, adjustments, season] =
@@ -23,13 +28,16 @@ export default async function HomePage() {
       getSubjects(),
       getRooms(),
       getRoutines(),
-      getAdjustments(),
+      getAdjustments(getSchoolToday()),
       getSetting("season"),
     ]);
 
   const now = new Date();
-  const today = getTodayLocal(now);
-  const dayIndex = getSchoolDayIndex(now);
+  // Resolved in the school's timezone, not the server's: on a UTC host these two
+  // disagree for six hours a day, which is how Monday's routine ended up under
+  // Tuesday's heading.
+  const today = getSchoolToday(now);
+  const dayIndex = getSchoolDayIndexNow(now);
 
   // The live "now teaching" board only ever shows one weekday, and it switches
   // periods client-side from this same payload. Slicing to the day here ships

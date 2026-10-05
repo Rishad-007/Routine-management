@@ -1,7 +1,7 @@
 import { TIFFIN_AFTER_PERIOD } from "./constants";
 import {
   getSchoolWeekRange,
-  getTodayLocal,
+  getSchoolToday,
 } from "./periods";
 import type { AdjustmentRow, RoutineRow } from "./types";
 
@@ -72,7 +72,7 @@ export function applyWeekAdjustmentsToRoutines(
 ): RoutineRow[] {
   const bounds = reference
     ? getSchoolWeekRange(reference)
-    : weekBoundsFor(getTodayLocal());
+    : weekBoundsFor(getSchoolToday());
 
   const byCell = new Map<string, AdjustmentRow>();
   for (const a of adjustments) {

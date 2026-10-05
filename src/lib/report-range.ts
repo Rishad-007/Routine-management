@@ -1,4 +1,4 @@
-import { getTodayLocal } from "./periods";
+import { getSchoolToday } from "./periods";
 
 export type ReportGranularity = "day" | "week" | "month" | "year";
 
@@ -190,6 +190,6 @@ export function resolveReportParams(
   )
     ? (rawRange as ReportGranularity)
     : "week";
-  const anchor = isValidYmd(rawDate) ? (rawDate as string) : getTodayLocal();
+  const anchor = isValidYmd(rawDate) ? (rawDate as string) : getSchoolToday();
   return getReportRange(granularity, anchor);
 }

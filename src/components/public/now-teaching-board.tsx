@@ -150,16 +150,23 @@ export function NowTeachingBoard({
     return () => clearInterval(id);
   }, [preview]);
 
-  // Pick up substitutions made during the current period. Skipped while the
+  // Pick up substitutions made during the current period, and repaint outright
+  // when the school day itself rolls over — `todayRows` was sliced on the server
+  // for a specific weekday, so a tab left open across midnight would otherwise
+  // keep showing yesterday's routine under today's heading. Skipped while the
   // user is previewing another period, so it never yanks the view out from
   // under them.
   const lastLivePeriod = useRef(livePeriod);
+  const lastDayIndex = useRef(dayIndex);
   useEffect(() => {
-    if (lastLivePeriod.current === livePeriod) return;
+    const dayRolled = lastDayIndex.current !== dayIndex;
+    const periodChanged = lastLivePeriod.current !== livePeriod;
+    if (!dayRolled && !periodChanged) return;
     lastLivePeriod.current = livePeriod;
+    lastDayIndex.current = dayIndex;
     if (preview !== null) return;
     router.refresh();
-  }, [livePeriod, preview, router]);
+  }, [livePeriod, dayIndex, preview, router]);
 
   const view: ViewState = isWeekend
     ? "weekend"
@@ -654,6 +661,7 @@ function StateMessage({
   icon: Icon,
   title,
   body,
+  time,
   action,
 }: {
   icon: typeof Moon;
@@ -666,7 +674,7 @@ function StateMessage({
     <div className="flex flex-col items-center gap-2 py-8 text-center">
       <Icon className="h-7 w-7 text-slate-300" />
       <p className="text-sm font-medium text-slate-600">
-        {title.replace("{time}", "")}
+        {title.replace("{time}", time ?? "")}
       </p>
       {body && <p className="max-w-sm text-xs text-slate-400">{body}</p>}
       {action}

@@ -47,9 +47,10 @@ import {
 import { getReportRange } from "@/lib/report-range";
 import {
   getCurrentPeriod,
-  getSchoolDayIndex,
-  getTodayLocal,
+  getSchoolDayIndexNow,
+  getSchoolToday,
 } from "@/lib/periods";
+import { getZonedParts } from "@/lib/school-time";
 import { DAY_LABEL_LIST, DAY_ORDER } from "@/lib/constants";
 import type { Season } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -82,8 +83,11 @@ const JS_DAY_NAMES = [
   "Saturday",
 ];
 
+// School timezone: on a UTC server the ambient calendar day is six hours behind,
+// so the header would read "Monday" while the page showed Tuesday's figures.
 function formatLongDate(d: Date): string {
-  return `${JS_DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  const p = getZonedParts(d);
+  return `${JS_DAY_NAMES[p.weekday]}, ${p.day} ${MONTHS[p.month - 1]} ${p.year}`;
 }
 
 function workloadLevel(weekly: number): "light" | "normal" | "heavy" {
@@ -130,15 +134,15 @@ export default async function AdminDashboardPage() {
     getTeachers(),
     getRooms(),
     getRoutines(),
-    getAdjustments(),
+    getAdjustments(getSchoolToday()),
     getAllAdjustments(),
     getSetting("season"),
   ]);
 
   const selectedSeason = (season as Season) ?? "summer";
-  const todayStr = getTodayLocal();
+  const todayStr = getSchoolToday();
   const now = new Date();
-  const dayIndex = getSchoolDayIndex(now);
+  const dayIndex = getSchoolDayIndexNow(now);
 
   // Suspension is a live overlay. Excluding suspended classes keeps workload,
   // coverage and room figures honest — a freed teacher is not teaching.

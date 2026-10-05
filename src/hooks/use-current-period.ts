@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import {
   getCurrentPeriod,
-  getSchoolDayIndex,
   type CurrentPeriodResult,
 } from "@/lib/periods";
+import { getSchoolDayIndexNow } from "@/lib/school-time";
 import type { Season } from "@/lib/constants";
 
 const TICK_MS = 30_000;
@@ -24,7 +24,8 @@ export function useCurrentPeriod(season: Season): {
 
   return {
     result: getCurrentPeriod(now, season),
-    dayIndex: getSchoolDayIndex(now),
+    // School timezone, so the browser agrees with what the server rendered.
+    dayIndex: getSchoolDayIndexNow(now),
     now,
   };
 }

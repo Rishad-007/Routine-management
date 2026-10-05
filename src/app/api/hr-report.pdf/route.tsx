@@ -28,6 +28,7 @@ import {
   shortLabel,
   type ReportRange,
 } from "@/lib/report-range";
+import { getZonedParts } from "@/lib/school-time";
 import { DAY_LABELS } from "@/lib/types";
 import type { AdjustmentRow } from "@/lib/types";
 import {
@@ -116,13 +117,15 @@ const LEDGER_COLS: PdfCol[] = [
 
 type ReportKind = "absence" | "stats" | "combined";
 
+/** Timestamps are UTC in the database; read them back in the school's timezone. */
 function formatStamp(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${dd} ${MONTH_SHORT[d.getMonth()]} ${String(d.getHours()).padStart(2, "0")}:${String(
-    d.getMinutes(),
+  const p = getZonedParts(d);
+  const dd = String(p.day).padStart(2, "0");
+  return `${dd} ${MONTH_SHORT[p.month - 1]} ${String(p.hour).padStart(2, "0")}:${String(
+    p.minute,
   ).padStart(2, "0")}`;
 }
 

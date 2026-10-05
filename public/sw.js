@@ -1,4 +1,4 @@
-const CACHE = "school-routine-v2";
+const CACHE = "school-routine-v3";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -48,9 +48,17 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 2) Freshness-critical paths (admin tools, API, PDFs): network-first.
+  // 2) Freshness-critical paths (admin tools, API, PDFs, and the live
+  //    dashboard): network-first.
   //    Admin data is never served stale — offline only falls back to cache.
-  if (request.mode !== "navigate" || url.pathname.startsWith("/admin")) {
+  //    "/" is included deliberately: its server-rendered board is resolved
+  //    against the current school day, so a cached document can pin yesterday's
+  //    routine under today's heading until the tab is reloaded.
+  if (
+    request.mode !== "navigate" ||
+    url.pathname.startsWith("/admin") ||
+    url.pathname === "/"
+  ) {
     event.respondWith(
       fetch(request)
         .then((response) => {

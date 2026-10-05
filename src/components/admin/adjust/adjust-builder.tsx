@@ -50,7 +50,7 @@ import {
   PERIOD_ORDER,
   TIFFIN_AFTER_PERIOD,
 } from "@/lib/constants";
-import { getSchoolDayIndex, getTodayLocal } from "@/lib/periods";
+import { getSchoolDayIndex, getSchoolToday } from "@/lib/periods";
 import { buildTeacherRoutinePreview } from "@/lib/teacher-routine-preview";
 import {
   applyAdjustmentsToRoutines,
@@ -94,13 +94,6 @@ interface Props {
   adjustments: AdjustmentRow[];
   initialDate?: string;
   rules: ClassPeriodRule[];
-}
-
-function toDateInput(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
 
 /**
@@ -172,7 +165,7 @@ export function AdjustBuilder({
   const router = useRouter();
 
   const [date, setDate] = useState(
-    () => initialDate ?? toDateInput(new Date()),
+    () => initialDate ?? getSchoolToday(),
   );
   const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(
     null,
@@ -225,7 +218,7 @@ export function AdjustBuilder({
   // Past dates are permanently stored history — viewable & downloadable
   // but not editable. Future/today dates remain editable.
   const isPastDate = useMemo(
-    () => (date ? date < getTodayLocal() : false),
+    () => (date ? date < getSchoolToday() : false),
     [date],
   );
 

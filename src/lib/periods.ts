@@ -1,5 +1,12 @@
 import type { Season } from "./constants";
 import { PERIOD_ORDER, TIFFIN_AFTER_PERIOD } from "./constants";
+import {
+  getSchoolDayIndexNow,
+  getSchoolToday,
+  getZonedParts,
+  wallClockToInstant,
+  type ZonedParts,
+} from "./school-time";
 
 // Durations in minutes (same for summer & winter)
 const PERIOD_DURATIONS: Record<number, number> = {
@@ -45,6 +52,10 @@ export function buildSchedule(season: Season, reference: Date): TimeBlock[] {
   const blocks: TimeBlock[] = [];
   let cursor = startMin;
 
+  // The school day is the one in the school's timezone, not the runtime's — on a
+  // UTC server that is a different calendar day for six hours out of every 24.
+  const day = getZonedParts(reference);
+
   for (const p of PERIOD_ORDER) {
     const startLabel = formatMinutes(cursor);
     const duration = PERIOD_DURATIONS[p];
@@ -53,8 +64,8 @@ export function buildSchedule(season: Season, reference: Date): TimeBlock[] {
     blocks.push({
       label: `Period ${p}`,
       periodNumber: p,
-      start: atMinutes(reference, startLabel),
-      end: atMinutes(reference, endLabel),
+      start: atMinutes(day, startLabel),
+      end: atMinutes(day, endLabel),
       startLabel,
       endLabel,
     });
@@ -65,8 +76,8 @@ export function buildSchedule(season: Season, reference: Date): TimeBlock[] {
       const tEnd = formatMinutes(cursor);
       blocks.push({
         label: "Tiffin",
-        start: atMinutes(reference, tStart),
-        end: atMinutes(reference, tEnd),
+        start: atMinutes(day, tStart),
+        end: atMinutes(day, tEnd),
         startLabel: tStart,
         endLabel: tEnd,
       });
@@ -76,11 +87,16 @@ export function buildSchedule(season: Season, reference: Date): TimeBlock[] {
   return blocks;
 }
 
-function atMinutes(reference: Date, hhmm: string): Date {
+/**
+ * The instant at which `hhmm` falls on the school day described by `day`.
+ *
+ * Deliberately not `date.setHours(...)`: that reads the wall clock of whatever
+ * timezone the code happens to run in, which put the bell at 14:30 for a school
+ * in UTC+6 whenever the server was UTC.
+ */
+function atMinutes(day: ZonedParts, hhmm: string): Date {
   const [h, m] = hhmm.split(":").map(Number);
-  const d = new Date(reference);
-  d.setHours(h, m, 0, 0);
-  return d;
+  return wallClockToInstant(day.year, day.month, day.day, h * 60 + m);
 }
 
 export interface CurrentPeriodResult {
@@ -93,9 +109,9 @@ export interface CurrentPeriodResult {
 
 /** Determine what is currently happening given a `now` date and season. */
 export function getCurrentPeriod(now: Date, season: Season): CurrentPeriodResult {
-  const reference = new Date(now);
-  reference.setHours(0, 0, 0, 0);
-  const blocks = buildSchedule(season, reference);
+  // buildSchedule derives the school day from the school's timezone, so the
+  // blocks are real instants that `now` can be compared against in any timezone.
+  const blocks = buildSchedule(season, now);
   const ms = now.getTime();
 
   for (const b of blocks) {
@@ -138,8 +154,17 @@ export function getSchoolDayWindow(season: Season, reference: Date): {
 }
 
 /**
- * Map a JS Date to the school day index.
- * Sunday=0 .. Thursday=4. Returns null for Friday/Saturday.
+ * Map a *calendar date* to the school day index. Sunday=0 .. Thursday=4.
+ * Returns null for Friday/Saturday.
+ *
+ * The argument is a date, not an instant: callers build it from a `YYYY-MM-DD`
+ * string (`new Date(ymd + "T00:00:00")`), where reading `getDay()` off the local
+ * midnight of that date is exactly right.
+ *
+ * To ask what day *right now* is, use `getSchoolDayIndexNow()` instead. Mixing
+ * the two up is what made the public dashboard show one weekday's routine under
+ * another weekday's heading: `getDay()` on a bare `new Date()` answers for the
+ * server's timezone (UTC in production), not the school's.
  */
 export function getSchoolDayIndex(date: Date): number | null {
   const jsDay = date.getDay(); // 0=Sun, 1=Mon, ... 6=Sat
@@ -148,19 +173,13 @@ export function getSchoolDayIndex(date: Date): number | null {
 }
 
 /**
- * Today's date as YYYY-MM-DD in the LOCAL timezone.
- * IMPORTANT: use this (not `new Date().toISOString()`, which is UTC) so the
- * server and the adjust page agree on which calendar day is "today". A UTC
- * "today" can drift from local "today" between midnight and the UTC offset,
- * which is why adjustments sometimes didn't appear in the main routine.
+ * Today's date at the school as YYYY-MM-DD.
+ *
+ * Anchored to `SCHOOL_TIME_ZONE`, so the server in UTC and the visitor's browser
+ * in UTC+6 always agree on the calendar day. Use this rather than
+ * `new Date().toISOString()` (UTC) or the bare local getters (wrong server TZ).
  */
-export function getTodayLocal(reference?: Date): string {
-  const d = reference ?? new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+export { getSchoolToday, getSchoolDayIndexNow };
 
 /**
  * The date picked in the browser's UI is the single source of truth. Server
@@ -173,7 +192,14 @@ export function resolveAdjustDate(adjustDate: string): string | null {
   return adjustDate;
 }
 
-/** Format a Date as local "YYYY-MM-DD" (never UTC — see getTodayLocal). */
+/**
+ * Format a *calendar date* Date as "YYYY-MM-DD".
+ *
+ * Local getters, not `toISOString()`: the value is a date the code constructed at
+ * local midnight (`new Date(y, m - 1, d)`) for calendar arithmetic, so reading
+ * local fields back is what round-trips. For "what date is it at the school
+ * right now", use `getSchoolToday()` instead.
+ */
 export function toLocalDateString(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -189,23 +215,23 @@ export function toLocalDateString(d: Date): string {
  * "live class showing" uses: a substitute's cover appears in the weekly grids
  * for the rest of the week it was made in, then disappears on its own.
  *
- * Built from local midnight arithmetic. Using `toISOString()` here would shift
- * the range by the UTC offset and silently drop or double-count the Sunday
- * and Saturday edges.
+ * The default reference is "now at the school" rather than the runtime's now, so
+ * the Sunday/Saturday edges cannot land on the wrong day when the server is in
+ * a different timezone. The arithmetic below is plain calendar maths on that
+ * date and is therefore timezone-independent.
  */
 export function getSchoolWeekRange(reference?: Date): {
   start: string;
   end: string;
 } {
-  const d = reference ?? new Date();
-  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  // getDay() is 0=Sun, so subtracting it lands exactly on the preceding Sunday.
-  start.setDate(start.getDate() - start.getDay());
-
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-
-  return { start: toLocalDateString(start), end: toLocalDateString(end) };
+  const parts = getZonedParts(reference);
+  const sunday = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day - parts.weekday),
+  );
+  const saturday = new Date(sunday.getTime() + 6 * 86_400_000);
+  const ymd = (d: Date) =>
+    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  return { start: ymd(sunday), end: ymd(saturday) };
 }
 
 export type { TimeBlock };
