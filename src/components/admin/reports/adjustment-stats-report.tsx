@@ -34,7 +34,6 @@ import {
 } from "@/components/ui/table";
 import { DAY_LABELS } from "@/lib/types";
 import type { AdjustmentStatsReport, TeacherCoverageEntry } from "@/lib/reports";
-import { cn } from "@/lib/utils";
 import { ReportStatCards } from "./report-stats-cards";
 
 type SortKey = "covered" | "fixed" | "diff" | "daysCovered" | "name";
@@ -50,12 +49,12 @@ const TOOLTIP_STYLE = {
 };
 
 function diffOf(t: TeacherCoverageEntry): number {
-  return t.covered - t.fixedWeekly;
+  return t.extraClasses;
 }
 
 export function AdjustmentStatsReport({ report }: Props) {
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("covered");
+  const [sortKey, setSortKey] = useState<SortKey>("diff");
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -359,8 +358,8 @@ export function AdjustmentStatsReport({ report }: Props) {
                 <TableRow>
                   <TableHead>Teacher</TableHead>
                   <TableHead className="text-right">Classes covered</TableHead>
+                  <TableHead className="text-right">Extra classes</TableHead>
                   <TableHead className="text-right">Fixed / week</TableHead>
-                  <TableHead className="text-right">Extra</TableHead>
                   <TableHead className="text-right">Days</TableHead>
                   <TableHead className="text-right">Primary</TableHead>
                   <TableHead className="text-right">Tag</TableHead>
@@ -376,11 +375,11 @@ export function AdjustmentStatsReport({ report }: Props) {
                     <TableCell className="text-right font-bold text-[#1e3a5f]">
                       {t.covered}
                     </TableCell>
-                    <TableCell className="text-right text-slate-600">
-                      {t.fixedWeekly}
-                    </TableCell>
                     <TableCell className="text-right">
                       <DiffBadge diff={diffOf(t)} />
+                    </TableCell>
+                    <TableCell className="text-right text-slate-600">
+                      {t.fixedWeekly}
                     </TableCell>
                     <TableCell className="text-right text-slate-600">
                       {t.daysCovered}
@@ -400,9 +399,10 @@ export function AdjustmentStatsReport({ report }: Props) {
             </Table>
           )}
           <p className="mt-3 text-xs text-slate-400">
-            &quot;Fixed / week&quot; = regular routine load. &quot;Extra&quot; = classes covered
-            this period beyond the fixed weekly load — the weekly view gives the most
-            direct comparison.
+            &quot;Extra classes&quot; = periods covered when the teacher was not already
+            timetabled to teach, so it counts genuinely additional work. A
+            substitution handed to someone already in that period appears under
+            &quot;Classes covered&quot; only.
           </p>
         </CardContent>
       </Card>
@@ -412,18 +412,12 @@ export function AdjustmentStatsReport({ report }: Props) {
 
 function DiffBadge({ diff }: { diff: number }) {
   if (diff === 0) return <span className="text-slate-400">0</span>;
-  const over = diff > 0;
   return (
     <Badge
       variant="outline"
-      className={cn(
-        "px-1.5 text-[10px] font-semibold",
-        over
-          ? "border-rose-200 bg-rose-50 text-rose-700"
-          : "border-slate-200 bg-slate-50 text-slate-500",
-      )}
+      className="border-rose-200 bg-rose-50 px-1.5 text-[10px] font-semibold text-rose-700"
     >
-      {over ? `+${diff}` : diff}
+      {`+${diff}`}
     </Badge>
   );
 }

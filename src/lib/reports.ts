@@ -75,6 +75,15 @@ export interface TeacherCoverageEntry {
   tagCovered: number;
   daysCovered: number;
   fixedWeekly: number;
+  /**
+   * Classes taken in a period the teacher was NOT already timetabled to teach —
+   * the genuinely additional periods, which is what "extra work" means to a
+   * class teacher. A substitution handed to someone who is already in that period
+   * is not extra, so it is excluded here.
+   */
+  extraClasses: number;
+  /** Days on which at least one genuinely additional class was taken. */
+  daysWithExtra: number;
   byDate: { date: string; count: number }[];
   weekdayCounts: number[];
   subjects: LabeledCount[];
@@ -84,8 +93,12 @@ export interface AdjustmentStatsReport {
   range: ReportRange;
   totalAdjustments: number;
   totalCovered: number;
+  /** Covered classes taken outside the coverer's own timetable — real extra work. */
+  totalExtraClasses: number;
   distinctSubstitutes: number;
   openSubstitutes: number;
+  /** Substitutes who took at least one genuinely additional class. */
+  teachersWithExtra: number;
   averagePerSchoolDay: number;
   series: SeriesPoint[];
   weekdayCounts: number[];
@@ -157,6 +170,24 @@ function buildSeries(
     }));
   }
   return [{ label: shortLabel(range.start), count: counts.get(range.start) ?? 0 }];
+}
+
+/**
+ * `teacherId -> day -> set of "period:isTag"` slots that teacher already teaches.
+ *
+ * Built once per report so a coverage row can be tested against the timetable.
+ */
+function slotIndex(routines: RoutineRow[]): Map<string, Map<number, Set<string>>> {
+  const index = new Map<string, Map<number, Set<string>>>();
+  for (const r of routines) {
+    if (!r.teacher_id) continue;
+    let days = index.get(r.teacher_id);
+    if (!days) index.set(r.teacher_id, (days = new Map()));
+    let slots = days.get(r.day);
+    if (!slots) days.set(r.day, (slots = new Set()));
+    slots.add(`${r.period_number}:${r.is_tag ? 1 : 0}`);
+  }
+  return index;
 }
 
 function buildUnavailabilityReport(
@@ -295,6 +326,9 @@ function buildAdjustmentStatsReport(
   const openById = new Map(teachers.map((t) => [t.id, t.is_open_teacher]));
   const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
 
+  const slots = slotIndex(routines);
+  const extraDays = new Map<string, Set<string>>();
+
   const teacherMap = new Map<string, TeacherCoverageEntry>();
   const dateTotals = new Map<string, number>();
   const weekdayTotals = [...EMPTY_WEEKDAY];
@@ -303,6 +337,7 @@ function buildAdjustmentStatsReport(
   let tagCount = 0;
   let totalAdjustments = 0;
   let totalCovered = 0;
+  let totalExtra = 0;
 
   for (const a of adjustments) {
     if (!inRange(a.adjust_date, range)) continue;
@@ -331,6 +366,8 @@ function buildAdjustmentStatsReport(
         tagCovered: 0,
         daysCovered: 0,
         fixedWeekly: 0,
+        extraClasses: 0,
+        daysWithExtra: 0,
         byDate: [],
         weekdayCounts: [...EMPTY_WEEKDAY],
         subjects: [],
@@ -342,6 +379,19 @@ function buildAdjustmentStatsReport(
     else entry.primaryCovered++;
     bumpByDate(entry.byDate, a.adjust_date);
     if (weekday !== null) entry.weekdayCounts[weekday]++;
+
+    // Extra work = the period was NOT already on this teacher's timetable for
+    // that weekday, so they were called in for a slot they did not have to teach.
+    if (
+      weekday !== null &&
+      !slots.get(t)?.get(weekday)?.has(`${a.period_number}:${a.is_tag ? 1 : 0}`)
+    ) {
+      entry.extraClasses++;
+      totalExtra++;
+      let days = extraDays.get(t);
+      if (!days) extraDays.set(t, (days = new Set()));
+      days.add(a.adjust_date);
+    }
   }
 
   const subjectByTeacher = new Map<string, Map<string, number>>();
@@ -358,17 +408,25 @@ function buildAdjustmentStatsReport(
       ...e,
       byDate: e.byDate.sort((a, b) => a.date.localeCompare(b.date)),
       daysCovered: e.byDate.length,
+      daysWithExtra: extraDays.get(e.teacherId)?.size ?? 0,
       fixedWeekly: weeklyLoad(routines, e.teacherId).total,
       subjects: toLabeled(subjectByTeacher.get(e.teacherId) ?? new Map(), subjectName),
     }))
-    .sort((a, b) => b.covered - a.covered || a.name.localeCompare(b.name));
+    .sort(
+      (a, b) =>
+        b.extraClasses - a.extraClasses ||
+        b.covered - a.covered ||
+        a.name.localeCompare(b.name),
+    );
 
   return {
     range,
     totalAdjustments,
     totalCovered,
+    totalExtraClasses: totalExtra,
     distinctSubstitutes: teachersSorted.length,
     openSubstitutes: teachersSorted.filter((e) => e.isOpen).length,
+    teachersWithExtra: teachersSorted.filter((e) => e.extraClasses > 0).length,
     averagePerSchoolDay:
       Math.round((totalAdjustments / countSchoolDays(range)) * 10) / 10,
     series: buildSeries(dateTotals, range),

@@ -12,6 +12,7 @@ import {
   UserPlus,
   UserX,
   BarChart3,
+  FileDown,
   Globe,
   ChevronDown,
   LogOut,
@@ -44,6 +45,7 @@ const MANAGE_ITEMS: NavItem[] = [
 const REPORT_ITEMS: NavItem[] = [
   { href: "/admin/unavailable-teachers", label: "Absence Report", icon: UserX },
   { href: "/admin/adjustment-stats", label: "Adjustment Stats", icon: BarChart3 },
+  { href: "/admin/downloads", label: "Downloads", icon: FileDown },
 ];
 
 const PUBLIC_ITEMS: NavItem[] = [

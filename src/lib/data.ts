@@ -280,6 +280,28 @@ export const getSettings = unstable_cache(
   { tags: ["settings"], revalidate: CACHE_SECONDS },
 );
 
+/**
+ * Admin id -> username, for attributing who recorded an adjustment.
+ * Only id and username are read; password hashes never leave the database.
+ *
+ * Returns a plain record rather than a Map on purpose: `unstable_cache`
+ * serialises cached values, so a Map comes back as a plain object on every read
+ * after the first and would silently lose its `.get()`.
+ */
+export const getAdminNames = unstable_cache(
+  async (): Promise<Record<string, string>> => {
+    const { data, error } = await db().from("admins").select("id, username");
+    if (error) throw new Error(error.message);
+    const out: Record<string, string> = {};
+    for (const a of (data ?? []) as { id: string; username: string }[]) {
+      out[a.id] = a.username;
+    }
+    return out;
+  },
+  ["admin-names"],
+  { tags: ["admins"], revalidate: CACHE_SECONDS },
+);
+
 export const getSetting = unstable_cache(
   async (key: string): Promise<string | null> => {
     const { data, error } = await db()

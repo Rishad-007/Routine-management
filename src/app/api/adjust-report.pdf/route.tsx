@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import React from "react";
-import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, Text, View } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT } from "@/lib/constants";
 import { getSchoolDayIndex } from "@/lib/periods";
+import { getSession } from "@/lib/auth";
 import { fetchAllRows, type PagedQuery } from "@/lib/data";
 import {
   filterSuspendedAdjustments,
   filterSuspendedRoutines,
 } from "@/lib/suspensions";
+import {
+  DocFooter,
+  DocHeader,
+  EmptyState,
+  TableHeader,
+  TableRow,
+  pdf,
+  type PdfCol,
+} from "@/lib/pdf-kit";
 import type {
   SectionRow,
   ClassRow,
@@ -22,106 +32,31 @@ import type {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const styles = StyleSheet.create({
-  page: {
-    padding: 28,
-    fontFamily: "Helvetica",
-    fontSize: 9,
-  },
-  header: {
-    textAlign: "center",
-    fontWeight: "bold",
-    fontSize: 14,
-    color: "#1e3a5f",
-    marginBottom: 3,
-  },
-  title: {
-    textAlign: "center",
-    fontWeight: "bold",
-    fontSize: 11,
-    color: "#0d9488",
-    marginBottom: 2,
-  },
-  subheader: {
-    textAlign: "center",
-    fontSize: 9,
-    color: "#334155",
-    marginBottom: 14,
-  },
-  teacherBlock: {
-    marginBottom: 16,
-  },
-  teacherName: {
-    fontWeight: "bold",
-    fontSize: 10,
-    color: "#1e3a5f",
-    marginBottom: 4,
-  },
-  noRows: {
-    fontSize: 9,
-    color: "#64748b",
-    textAlign: "center",
-    padding: 12,
-  },
-  table: {
-    width: "100%",
-    borderStyle: "solid",
-    borderWidth: 0.5,
-    borderColor: "#cbd5e1",
-  },
-  row: { flexDirection: "row" },
-  headCell: {
-    borderStyle: "solid",
-    borderWidth: 0.5,
-    borderColor: "#cbd5e1",
-    padding: 5,
-    fontWeight: "bold",
-    fontSize: 8,
-    backgroundColor: "#f1f5f9",
-    color: "#1e3a5f",
-    textAlign: "center",
-  },
-  bodyCell: {
-    borderStyle: "solid",
-    borderWidth: 0.5,
-    borderColor: "#cbd5e1",
-    padding: 5,
-    fontSize: 8,
-    color: "#334155",
-    textAlign: "center",
-  },
-  clsCol: { width: "28%" },
-  perCol: { width: "10%" },
-  subCol: { width: "22%" },
-  teaCol: { width: "22%" },
-  sigCol: { width: "18%" },
-  footer: {
-    marginTop: 6,
-    textAlign: "center",
-    fontSize: 7,
-    color: "#94a3b8",
-  },
-  credit: {
-    textAlign: "center",
-    fontSize: 6,
-    color: "#b0b7c0",
-    marginTop: 1,
-  },
-});
+/**
+ * One small table per unavailable teacher: the teacher's name heads the block and
+ * the column header follows it, so a class teacher can initial the whole block at
+ * once. The teacher therefore does NOT need a column of its own.
+ *
+ * The blocks run continuously down a single `<Page>` with no forced page break
+ * between them. Each block is `wrap={false}`, so a block is never split: when the
+ * page runs out of room the whole table moves to the next page with its heading
+ * and header intact, and `repeat={false}` stops one teacher's header from being
+ * painted on every other teacher's continuation.
+ */
+const COLS: PdfCol[] = [
+  { label: "Class & Section", width: "32%" },
+  { label: "Period", width: "8%", align: "center" },
+  { label: "Subject", width: "27%" },
+  { label: "New Assigned Teacher", width: "23%" },
+  { label: "Signature", width: "10%" },
+];
 
 interface ReportRow {
   label: string;
   period: number;
   subjectName: string;
   newTeacher: string;
-  isTag: boolean;
   sortLabel: string;
-}
-
-interface TeacherGroup {
-  name: string;
-  code: string;
-  rows: ReportRow[];
 }
 
 async function fetchReportData(date: string) {
@@ -196,49 +131,57 @@ async function fetchReportData(date: string) {
         (baseRow?.subject_id && sub.get(baseRow.subject_id)?.name) ||
         "—";
 
-      const newTeacherRow = a.new_teacher_id ? tch.get(a.new_teacher_id) : undefined;
-      const newTeacher =
-        newTeacherRow?.full_name || "—";
-
       return {
         originalTeacherId: a.original_teacher_id,
         label,
         period: a.period_number ?? 0,
         subjectName: a.is_tag ? `${subjectName} (Tag)` : subjectName,
-        newTeacher,
-        isTag: a.is_tag,
+        newTeacher: (a.new_teacher_id ? tch.get(a.new_teacher_id)?.full_name : undefined) || "—",
         sortLabel: `${classRow?.name ?? ""}${section?.name ?? ""}`,
       };
     });
 
+  // One group per unavailable teacher, then by class, then by period. Each group
+  // becomes its own small table with the teacher's name as the heading.
   const groups = new Map<string, ReportRow[]>();
   for (const r of rows) {
     const key = r.originalTeacherId ?? "__none__";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(r);
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(r);
+    else groups.set(key, [r]);
   }
 
-  const groupList: TeacherGroup[] = Array.from(groups.entries()).map(
-    ([id, groupRows]) => {
+  const groupList = Array.from(groups.entries())
+    .map(([id, groupRows]) => {
       const t = id !== "__none__" ? tch.get(id) : undefined;
       return {
+        id,
         name: t?.full_name || "—",
         code: t?.teacher_code ?? "",
         rows: groupRows.sort(
-          (a, b) =>
-            a.sortLabel.localeCompare(b.sortLabel) ||
-            a.period - b.period
+          (a, b) => a.sortLabel.localeCompare(b.sortLabel) || a.period - b.period
         ),
       };
-    }
-  );
-  groupList.sort((a, b) => a.name.localeCompare(b.name));
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
-  const total = rows.length;
-  return { groupList, total, dayIndex, label: DAY_LABEL_LIST[dayIndex] };
+  return {
+    groups: groupList,
+    total: rows.length,
+    teacherCount: groupList.length,
+    dayIndex,
+    label: DAY_LABEL_LIST[dayIndex],
+  };
 }
 
 export async function GET(req: NextRequest) {
+  // Staff absence data — this route is not covered by the /admin middleware
+  // matcher, so it must verify the session itself.
+  const session = await getSession();
+  if (!session) {
+    return new NextResponse("Unauthorized", { status: 401 });
+  }
+
   const { searchParams } = new URL(req.url);
   const date = searchParams.get("date");
   if (!date) {
@@ -262,97 +205,60 @@ export async function GET(req: NextRequest) {
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const { groupList, total, label } = data;
+  const { groups, total, teacherCount, label } = data;
 
-  // Paginate: max 8 unavailable-teacher blocks per page.
-  const perPage = 8;
-  const pages: TeacherGroup[][] = [];
-  for (let i = 0; i < groupList.length; i += perPage) {
-    pages.push(groupList.slice(i, i + perPage));
-  }
-  if (pages.length === 0) pages.push([]);
-
-  const TableRow = ({ r }: { r: ReportRow }) => (
-    <View style={styles.row}>
-      <View style={[styles.bodyCell, styles.clsCol]}>
-        <Text>{r.label}</Text>
-      </View>
-      <View style={[styles.bodyCell, styles.perCol]}>
-        <Text>{r.period}</Text>
-      </View>
-      <View style={[styles.bodyCell, styles.subCol]}>
-        <Text>{r.subjectName}</Text>
-      </View>
-      <View style={[styles.bodyCell, styles.teaCol]}>
-        <Text>{r.newTeacher}</Text>
-      </View>
-      <View style={[styles.bodyCell, styles.sigCol]}>
-        <Text> </Text>
-      </View>
-    </View>
-  );
-
+  // ONE page, ONE continuous run of per-teacher tables. Nothing forces a page
+  // break between them: each block only moves to the next page when it no longer
+  // fits, and it always moves whole.
   const PDFDoc = (
     <Document>
-      {pages.map((pageGroups, pi) => (
-        <Page key={pi} size="A4" orientation="portrait" style={styles.page}>
-          <Text style={styles.header}>{SCHOOL_NAME_DEFAULT}</Text>
-          <Text style={styles.title}>Daily Adjustment Report — Adjust Class</Text>
-          <Text style={styles.subheader}>
-            Date: {date} ({label}) · {total} substitution(s), {groupList.length}{" "}
-            unavailable teacher(s)
-          </Text>
+      <Page size="A4" orientation="portrait" style={pdf.page}>
+        <DocHeader
+          schoolName={SCHOOL_NAME_DEFAULT}
+          title="Daily Adjustment Report — Adjust Class"
+          subtitle={`Date: ${date} (${label}) · ${total} substitution(s), ${teacherCount} unavailable teacher(s)`}
+        />
 
-          {groupList.length === 0 ? (
-            <Text style={styles.noRows}>
-              No adjustments recorded for this date.
-            </Text>
-          ) : (
-            pageGroups.map((g) => (
-              <View key={`${g.name}-${g.code}`} style={styles.teacherBlock}>
-                <Text style={styles.teacherName}>
-                  Unavailable Teacher: {g.name}
-                  {g.code ? `  (${g.code})` : ""}
-                </Text>
-                <View style={styles.table}>
-                  <View style={styles.row}>
-                    <View style={[styles.headCell, styles.clsCol]}>
-                      <Text>Class &amp; Section</Text>
-                    </View>
-                    <View style={[styles.headCell, styles.perCol]}>
-                      <Text>Period</Text>
-                    </View>
-                    <View style={[styles.headCell, styles.subCol]}>
-                      <Text>Subject</Text>
-                    </View>
-                    <View style={[styles.headCell, styles.teaCol]}>
-                      <Text>New Assigned Teacher</Text>
-                    </View>
-                    <View style={[styles.headCell, styles.sigCol]}>
-                      <Text>Signature</Text>
-                    </View>
-                  </View>
-                  {g.rows.map((r, ri) => (
-                    <TableRow key={ri} r={r} />
-                  ))}
+        {groups.length === 0 ? (
+          <EmptyState>No adjustments recorded for this date.</EmptyState>
+        ) : (
+          <>
+            {groups.map((g) => (
+              <View key={g.id} wrap={false}>
+                <View style={pdf.groupHeading}>
+                  <Text style={pdf.groupHeadingName}>
+                    {g.code ? `${g.name}  (${g.code})` : g.name}
+                  </Text>
+                  <Text style={pdf.groupHeadingMeta}>
+                    {`${g.rows.length} period(s) reassigned`}
+                  </Text>
                 </View>
+                <TableHeader cols={COLS} repeat={false} />
+                {g.rows.map((r, i) => (
+                  <TableRow
+                    key={`${g.id}-${r.sortLabel}-${r.period}-${r.subjectName}-${i}`}
+                    cols={COLS}
+                    striped={i % 2 === 1}
+                    cells={[r.label, String(r.period), r.subjectName, r.newTeacher, ""]}
+                  />
+                ))}
               </View>
-            ))
-          )}
+            ))}
+            <View style={{ marginTop: 8 }}>
+              <Text style={pdf.sectionNote}>
+                {`Total substitutions on this date: ${total}, grouped by the unavailable teacher who could not teach them. Initial one block, then pass the sheet to the class teacher.`}
+              </Text>
+            </View>
+          </>
+        )}
 
-          <Text style={styles.footer}>
-            Cantonment Public School &amp; College, Rangpur
-          </Text>
-          <Text style={styles.credit}>
-            Software by Rishad Nur &amp; CPSCR ICT department (School)
-          </Text>
-        </Page>
-      ))}
+        <DocFooter note={`Daily Adjustment Report · ${date} (${label})`} />
+      </Page>
     </Document>
   );
 
-  const { pdf } = await import("@react-pdf/renderer");
-  const buffer = (await pdf(PDFDoc).toBuffer()) as unknown as BodyInit;
+  const { pdf: renderPdf } = await import("@react-pdf/renderer");
+  const buffer = (await renderPdf(PDFDoc).toBuffer()) as unknown as BodyInit;
 
   return new NextResponse(buffer, {
     headers: {
