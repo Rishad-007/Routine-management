@@ -8,6 +8,7 @@ import {
   getSections,
   getSubjects,
   getTeachers,
+  getTeacherUnavailability,
 } from "@/lib/data";
 import {
   applyWeekAdjustmentsToRoutines,
@@ -24,6 +25,13 @@ import {
   suspendedClassIdSet,
 } from "@/lib/suspensions";
 import { getSchoolDayIndexNow, getSchoolWeekRange } from "@/lib/periods";
+import {
+  reasonLabel,
+  unavailableEntry,
+  unavailabilityIndex,
+  weekDateForDay,
+  wholeDayTeacherIds,
+} from "@/lib/unavailability";
 import { DAY_ORDER, PERIOD_ORDER } from "@/lib/constants";
 import { DAY_LABELS } from "@/lib/types";
 import type { RoutinePreviewSourceRow } from "@/lib/teacher-routine-preview";
@@ -48,7 +56,7 @@ export default async function FreeTeachersPage({
   const day =
     DAY_ORDER.includes(requested) ? requested : (todayIndex ?? DAY_ORDER[0]);
 
-  const [teachers, routines, adjustments, sections, classes, rules, subjects, rooms] =
+  const [teachers, routines, adjustments, sections, classes, rules, subjects, rooms, unavailability] =
     await Promise.all([
       getTeachers(),
       getRoutines(),
@@ -61,7 +69,25 @@ export default async function FreeTeachersPage({
       getClassPeriodRules(),
       getSubjects(),
       getRooms(),
+      getTeacherUnavailability(),
     ]);
+
+  // Unavailability is date-scoped but this screen has no date picker — only a
+  // weekday — so the weekday is anchored to this week's copy of it, the same
+  // anchor /admin/assign warns on. Whole-day only: a teacher blocked at P3
+  // alone is still free to cover every other period, so they belong in Free.
+  const anchorDate = weekDateForDay(getSchoolWeekRange().start, day);
+  const unavailIndex = unavailabilityIndex(unavailability, anchorDate);
+  const outIds = wholeDayTeacherIds(unavailIndex);
+  const unavailableLabels: Record<string, string> = {};
+  for (const id of outIds) {
+    const entry = unavailableEntry(unavailIndex, id);
+    if (entry) {
+      unavailableLabels[id] = `${reasonLabel(entry.reason)}${
+        entry.note ? ` — ${entry.note}` : ""
+      } · ${anchorDate}`;
+    }
+  }
 
   // Suspension is a live overlay: a suspended class's slots do not count, so
   // its teachers read as free without touching the weekly routine. Filter
@@ -164,7 +190,9 @@ export default async function FreeTeachersPage({
   const periods: PeriodAvailability[] = PERIOD_ORDER.map((period) => {
     const free: TeacherAvailability[] = [];
     const busy: TeacherAvailability[] = [];
+    const unavailable: TeacherAvailability[] = [];
     for (const t of teachers) {
+      const out = outIds.has(t.id);
       const isBusy = isBusyIndexed(dayIndex, t.id, day, period);
       const entry = {
         id: t.id,
@@ -174,20 +202,27 @@ export default async function FreeTeachersPage({
         dayCount: dayCountIndexed(dayIndex, t.id, day),
         stretch: stretchIndexed(dayIndex, t.id, day),
         weekTotal: weekIndex.weeklyTotal.get(t.id) ?? 0,
-        where: isBusy
-          ? (effective.find(
-              (r) =>
-                r.teacher_id === t.id &&
-                r.period_number === period &&
-                r.day === day,
-            )?.section_id ?? null)
-          : null,
+        // An absent teacher is not teaching anywhere, even though their base
+        // routine still lists a class — blanking `where` keeps the view from
+        // reporting them as present in a room they are not in.
+        where:
+          isBusy && !out
+            ? (effective.find(
+                (r) =>
+                  r.teacher_id === t.id &&
+                  r.period_number === period &&
+                  r.day === day,
+              )?.section_id ?? null)
+            : null,
         // Busy purely because of a saved cover — a genuine slot once that
         // substitution is removed. `adjustedToday` replaced with an explicit
         // signal so the client does not have to recompute it.
-        isCovering: isBusy && isCoveringIndexed(dayIndex, t.id, day, period),
+        isCovering:
+          isBusy && !out && isCoveringIndexed(dayIndex, t.id, day, period),
+        note: out ? (unavailableLabels[t.id] ?? null) : null,
       };
-      if (isBusy) busy.push(entry);
+      if (out) unavailable.push(entry);
+      else if (isBusy) busy.push(entry);
       else free.push(entry);
     }
 
@@ -203,6 +238,12 @@ export default async function FreeTeachersPage({
       sectionsRunning: sectionsRunning.get(period) ?? 0,
       free: free.sort(rank),
       busy: busy
+        .sort(rank)
+        .map((t) => ({
+          ...t,
+          where: t.where ? (sectionLabel.get(t.where) ?? null) : null,
+        })),
+      unavailable: unavailable
         .sort(rank)
         .map((t) => ({
           ...t,
@@ -226,6 +267,13 @@ export default async function FreeTeachersPage({
         totalTeachers={teachers.length}
         adjustedToday={effective.some((r) => r.is_adjusted)}
         suspendedClasses={suspendedClassList}
+        unavailableTeachers={teachers
+          .filter((t) => outIds.has(t.id))
+          .map((t) => ({
+            name: t.full_name,
+            note: unavailableLabels[t.id] ?? "",
+          }))}
+        anchorDate={anchorDate}
         teacherLabels={teacherLabels}
         subjectLabels={subjectLabels}
         roomLabels={roomLabels}

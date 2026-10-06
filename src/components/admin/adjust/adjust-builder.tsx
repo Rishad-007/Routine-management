@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -44,7 +44,8 @@ import {
   ChevronDown,
   History,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, normalizeSearch } from "@/lib/utils";
+import { PeriodStrip } from "@/components/admin/period-strip";
 import {
   DAY_LABEL_LIST,
   PERIOD_ORDER,
@@ -82,7 +83,16 @@ import type {
   RoomRow,
   RoutineRow,
   AdjustmentRow,
+  TeacherUnavailabilityRow,
 } from "@/lib/types";
+import {
+  isUnavailableAt,
+  reasonLabel,
+  unavailableEntry,
+  unavailablePeriods,
+  unavailableTeacherIds,
+  unavailabilityIndex,
+} from "@/lib/unavailability";
 
 interface Props {
   classes: ClassRow[];
@@ -95,17 +105,11 @@ interface Props {
   adjustments: AdjustmentRow[];
   initialDate?: string;
   rules: ClassPeriodRule[];
-}
-
-/**
- * Fold a value for substring search: lowercase + collapse internal whitespace.
- * Names are typed with inconsistent spacing in practice ("Md.  Rahim" vs
- * "md rahim"), so an un-normalized `includes` misses rows a human considers
- * identical. Codes and ids contain no spaces but go through the same path so
- * one comparison helper serves every search box.
- */
-function normalizeSearch(value: string | null | undefined) {
-  return (value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  /**
+   * Every unavailability row, all dates. Indexed against the picked `date`
+   * below rather than here, since the date is picked in this component.
+   */
+  unavailability: TeacherUnavailabilityRow[];
 }
 
 /** Tooltip text for a period a teacher is occupied at, per assignment role. */
@@ -170,6 +174,7 @@ export function AdjustBuilder({
   adjustments,
   initialDate,
   rules,
+  unavailability,
 }: Props) {
   const router = useRouter();
 
@@ -223,6 +228,34 @@ export function AdjustBuilder({
     [date],
   );
   const isNoSchool = dayIndex === null;
+
+  // Declared unavailability for the picked date. Recomputed on `date` rather
+  // than filtered once: this sheet is the only surface that honours PERIOD-only
+  // records, and their whole meaning is "on that one date".
+  const unavailIndex = useMemo(
+    () => unavailabilityIndex(unavailability, date),
+    [unavailability, date],
+  );
+
+  // The rail's scope: only teachers declared unavailable on the picked date.
+  // This page's job is covering absences, so a teacher who is present and
+  // teaching has nothing to adjust here.
+  const unavailableOnDate = useMemo(
+    () => unavailableTeacherIds(unavailIndex),
+    [unavailIndex],
+  );
+
+  // Keep the selection inside the rail. On load and every date change, if the
+  // selected teacher is no longer unavailable (or hasn't been picked yet),
+  // surface the first unavailable teacher immediately so the day grid is
+  // useful without an extra click.
+  useEffect(() => {
+    if (isNoSchool) return;
+    if (!selectedTeacherId || !unavailableOnDate.has(selectedTeacherId)) {
+      const first = teachers.find((t) => unavailableOnDate.has(t.id));
+      setSelectedTeacherId(first?.id ?? null);
+    }
+  }, [unavailableOnDate, teachers, selectedTeacherId, isNoSchool]);
 
   // Past dates are permanently stored history — viewable & downloadable
   // but not editable. Future/today dates remain editable.
@@ -531,17 +564,18 @@ export function AdjustBuilder({
     tagOverrides,
   ]);
 
-  const filteredTeachers = useMemo(() => {
+  const railTeachers = useMemo(() => {
     const q = normalizeSearch(teacherSearch);
-    if (!q) return teachers;
-    return teachers.filter(
+    const base = teachers.filter((t) => unavailableOnDate.has(t.id));
+    if (!q) return base;
+    return base.filter(
       (t) =>
         normalizeSearch(t.full_name).includes(q) ||
         normalizeSearch(t.short_name).includes(q) ||
         normalizeSearch(t.teacher_code).includes(q) ||
         normalizeSearch(t.id).includes(q),
     );
-  }, [teachers, teacherSearch]);
+  }, [teachers, teacherSearch, unavailableOnDate]);
 
   // Fold the pending (unsaved) overrides into the active day's schedule so the
   // candidate lists, busy states and load counts stay truthful WHILE editing —
@@ -660,6 +694,14 @@ export function AdjustBuilder({
         isCurrentHolder: sheetTab === "primary"
           ? t.id === currentSheetCell?.effectiveTeacherId
           : t.id === currentSheetCell?.tagEffectiveTeacherId,
+        // Declared out at THIS period. Deliberately `isUnavailableAt` and not
+        // the whole-day test: this is the one surface where a period-scoped
+        // record has any meaning, so it must not be filtered to whole-day only.
+        unavailable:
+          sheetPeriod !== null &&
+          isUnavailableAt(unavailIndex, t.id, sheetPeriod),
+        unavailEntry: unavailableEntry(unavailIndex, t.id),
+        unavailPeriods: unavailablePeriods(unavailIndex, t.id),
         subjectMatch:
           !!sheetSubjectFilter &&
           (t.is_open_teacher ||
@@ -688,6 +730,7 @@ export function AdjustBuilder({
     busyTeachersForPeriod,
     sheetSubjectFilter,
     sheetSubjectTeacherIds,
+    unavailIndex,
   ]);
 
   const searchedSheetTeachers = useMemo(() => {
@@ -703,12 +746,15 @@ export function AdjustBuilder({
     );
   }, [sheetTeacherRows, sheetSearch]);
 
+  // Unavailable teachers are EXCLUDED from the sheet entirely: they are not a
+  // candidate at any role on the date, so listing them — even disabled — would
+  // read as "there is a reason to pick them". Both bucket filters drop them.
   const freeSheetTeachers = useMemo(
-    () => searchedSheetTeachers.filter((t) => !t.busy),
+    () => searchedSheetTeachers.filter((t) => !t.busy && !t.unavailable),
     [searchedSheetTeachers],
   );
   const busySheetTeachers = useMemo(
-    () => searchedSheetTeachers.filter((t) => t.busy),
+    () => searchedSheetTeachers.filter((t) => t.busy && !t.unavailable),
     [searchedSheetTeachers],
   );
 
@@ -769,83 +815,29 @@ export function AdjustBuilder({
     return map;
   }, [pendingRoutines, dayIndex, sections, classes, subjectMap]);
 
-  // Per-period free/busy strip for a teacher card: one cell per period, green
-  // when they are free and red when they already hold a class. Reads the same
-  // pending index the load counts do, so it repaints the moment an assignment is
-  // made, before anything is saved.
-  //
-  // Tiffin gets a neutral cell rather than a green or red one: it is a break
-  // between P4 and P5, so no teacher is free or busy then and colouring it would
-  // invent a class hour that does not exist.
+  // Per-period free/busy strip for a teacher card. Reads the same pending index
+  // the load counts do, so it repaints the moment an assignment is made, before
+  // anything is saved. The rendering itself lives in <PeriodStrip>.
   const teacherPeriodStrip = (teacherId: string) => {
     if (dayIndex === null) return null;
 
     const busy = busyPeriodsIndexed(pendingIndex, teacherId, dayIndex);
     const labels = teacherPeriodLabels.get(teacherId);
 
-    const freeAt: string[] = [];
-    const busyAt: string[] = [];
-    for (const p of PERIOD_ORDER) {
-      (busy.has(p) ? busyAt : freeAt).push(`P${p}`);
-    }
-
     return (
-      <div
-        role="img"
-        aria-label={`Free at ${freeAt.join(", ") || "no periods"}. Busy at ${
-          busyAt.join(", ") || "no periods"
-        }.`}
-        className="mt-2 flex items-center gap-1"
-      >
-        {PERIOD_ORDER.flatMap((period) => {
-          // Tiffin sits BETWEEN P4 and P5, so the T cell is emitted ahead of
-          // period 5 rather than in place of it — returning early here used to
-          // swallow P5 entirely and leave the strip one cell short.
-          const cells = [];
-
-          if (period === TIFFIN_AFTER_PERIOD + 1) {
-            cells.push(
-              <span
-                key="tiffin"
-                title="Tiffin — no classes"
-                className="flex h-6 w-6 items-center justify-center rounded bg-amber-100 text-[10px] font-semibold text-amber-700"
-              >
-                T
-              </span>,
-            );
-          }
-
-          const isBusy = busy.has(period);
+      <PeriodStrip
+        busy={busy}
+        className="mt-2"
+        describe={(period) => {
           const detail = labels?.get(period);
+          if (!detail) return null;
           // A cell occupied only as the second (tag) teacher is still a clash —
           // the DB trigger counts it — but the tooltip says so, since that class
           // can be freed by dropping the tag rather than the whole period.
-          const tagOnly = !detail?.primary && !!detail?.tag;
-
-          cells.push(
-            <span
-              key={period}
-              title={
-                isBusy
-                  ? `P${period} · ${detail?.primary ?? detail?.tag ?? "Busy"}${
-                      tagOnly ? " · tag" : ""
-                    }`
-                  : `P${period} · Free`
-              }
-              className={cn(
-                "flex h-6 w-6 items-center justify-center rounded text-[10px] font-semibold",
-                isBusy
-                  ? "bg-red-100 text-red-700"
-                  : "bg-emerald-100 text-emerald-700",
-              )}
-            >
-              {period}
-            </span>,
-          );
-
-          return cells;
-        })}
-      </div>
+          const tagOnly = !detail.primary && !!detail.tag;
+          return `${detail.primary ?? detail.tag}${tagOnly ? " · tag" : ""}`;
+        }}
+      />
     );
   };
 
@@ -910,6 +902,23 @@ export function AdjustBuilder({
       cell.sectionId,
       false,
     );
+
+    // HARD BLOCK: the substitute has been declared unavailable on this date.
+    // Unlike the busy check below there is nothing to "free first" — the record
+    // is an explicit statement that they are not present, so it is neither a
+    // conflict to force-approve nor a warning to override. The only way past it
+    // is to clear the declaration on Mark Unavailable.
+    if (isUnavailableAt(unavailIndex, newTeacherId, period)) {
+      const entry = unavailableEntry(unavailIndex, newTeacherId);
+      const name =
+        teachers.find((t) => t.id === newTeacherId)?.full_name ?? "This teacher";
+      toast.error(
+        `${name} is marked unavailable on ${date}${
+          entry ? ` — ${reasonLabel(entry.reason).toLowerCase()}` : ""
+        }. Clear it on Mark Unavailable before assigning.`,
+      );
+      return;
+    }
 
     // HARD BLOCK: the substitute is already teaching another class at this
     // day+period. This is a double-booking and cannot be force-approved.
@@ -978,6 +987,20 @@ export function AdjustBuilder({
         return next;
       });
       setSheetOpen(false);
+      return;
+    }
+
+    // HARD BLOCK: same rule as the primary role — an unavailable teacher is not
+    // free at any role in the cell, tag included.
+    if (isUnavailableAt(unavailIndex, newTeacherId, period)) {
+      const entry = unavailableEntry(unavailIndex, newTeacherId);
+      const name =
+        teachers.find((t) => t.id === newTeacherId)?.full_name ?? "This teacher";
+      toast.error(
+        `${name} is marked unavailable on ${date}${
+          entry ? ` — ${reasonLabel(entry.reason).toLowerCase()}` : ""
+        }. Clear it on Mark Unavailable before assigning.`,
+      );
       return;
     }
 
@@ -1457,14 +1480,34 @@ export function AdjustBuilder({
                   className="pl-8"
                 />
               </div>
+              <p className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                <span>
+                  <strong className="text-violet-700">{railTeachers.length}</strong>{" "}
+                  unavailable
+                </span>
+                <span className="text-slate-400">{date}</span>
+              </p>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {filteredTeachers.map((t) => {
-                const isSelected = t.id === selectedTeacherId;
+              {railTeachers.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400">
+                  No teachers marked unavailable on {date}. Declare someone on
+                  Mark Unavailable first.
+                </div>
+              ) : (
+                railTeachers.map((t) => {
+                  const isSelected = t.id === selectedTeacherId;
                 const dayCount = teacherDayCounts.get(t.id) ?? 0;
                 const stretch = teacherDayStats.get(t.id)?.stretch ?? 0;
                 const heavy = dayCount >= 4;
                 const red = dayCount >= 5;
+                // Badge only — never a filter. This is the rail an admin opens
+                // to reassign AWAY from the absent teacher, so hiding them here
+                // would hide exactly the person whose classes need covering.
+                const unavail = unavailableEntry(unavailIndex, t.id);
+                const outPeriods = unavail
+                  ? unavailablePeriods(unavailIndex, t.id)
+                  : [];
                 return (
                   <button
                     key={t.id}
@@ -1500,15 +1543,36 @@ export function AdjustBuilder({
                     </div>
                     <div className="mt-0.5 flex items-center justify-between text-xs text-slate-500">
                       <span>{t.teacher_code}</span>
-                      {stretch >= 3 && (
-                        <span className="text-amber-600">
-                          {stretch} continuous
-                        </span>
-                      )}
+                      <span className="flex items-center gap-1.5">
+                        {unavail && (
+                          <span
+                            className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700"
+                            title={`${reasonLabel(unavail.reason)}${
+                              unavail.note ? ` — ${unavail.note}` : ""
+                            } · ${
+                              unavail.isWholeDay
+                                ? "whole day"
+                                : `P${outPeriods.join(", P")}`
+                            }`}
+                          >
+                            {unavail.isWholeDay
+                              ? "out"
+                              : outPeriods.length === 1
+                                ? `P${outPeriods[0]}`
+                                : `P${outPeriods[0]}+${outPeriods.length - 1}`}
+                          </span>
+                        )}
+                        {stretch >= 3 && (
+                          <span className="text-amber-600">
+                            {stretch} continuous
+                          </span>
+                        )}
+                      </span>
                     </div>
                   </button>
                 );
-              })}
+                })
+              )}
             </div>
           </div>
 

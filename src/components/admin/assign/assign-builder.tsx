@@ -40,6 +40,12 @@ import {
 } from "@/app/admin/assign/actions";
 import { isPeriodAllowed, type ClassPeriodRule } from "@/lib/class-period-rules";
 import { DAY_ORDER, PERIOD_ORDER, TIFFIN_AFTER_PERIOD } from "@/lib/constants";
+import { getSchoolWeekRange } from "@/lib/periods";
+import {
+  isWholeDayUnavailable,
+  unavailabilityIndex,
+  weekDateForDay,
+} from "@/lib/unavailability";
 import { cn } from "@/lib/utils";
 import {
   DAY_LABELS,
@@ -50,6 +56,7 @@ import {
   type SubjectRow,
   type TeacherRow,
   type TeacherSubjectRow,
+  type TeacherUnavailabilityRow,
 } from "@/lib/types";
 
 interface Props {
@@ -62,6 +69,8 @@ interface Props {
   routines: RoutineRow[];
   rules: ClassPeriodRule[];
   initialTeacherId: string | null;
+  /** Every unavailability row, all dates. Indexed against the school week below. */
+  unavailability: TeacherUnavailabilityRow[];
 }
 
 interface CellTarget {
@@ -86,6 +95,7 @@ export function AssignBuilder({
   routines,
   rules,
   initialTeacherId,
+  unavailability,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -144,6 +154,31 @@ export function AssignBuilder({
         t.teacher_code.toLowerCase().includes(q),
     );
   }, [teachersState, search]);
+
+  /**
+   * Which school days of THIS week each teacher is declared out for, as a
+   * label like "Wednesday" or "Sunday, Tuesday".
+   *
+   * This screen has no date picker, so absence is anchored to the current
+   * school week — the same anchor `assignTeacherPeriod` warns on, so the rail
+   * badge and the save warning can never name different days. Whole-day only:
+   * a period-scoped note is not an absence and this screen cannot act on it.
+   */
+  const weekUnavailable = useMemo(() => {
+    const start = getSchoolWeekRange().start;
+    const indices = DAY_ORDER.map((day) =>
+      unavailabilityIndex(unavailability, weekDateForDay(start, day)),
+    );
+    const map = new Map<string, string>();
+    for (const t of teachersState) {
+      const out: string[] = [];
+      indices.forEach((index, day) => {
+        if (isWholeDayUnavailable(index, t.id)) out.push(DAY_LABELS[day]);
+      });
+      if (out.length > 0) map.set(t.id, out.join(", "));
+    }
+    return map;
+  }, [unavailability, teachersState]);
 
   /** This teacher's own cells, keyed "day:period". */
   const ownCells = useMemo(() => {
@@ -376,6 +411,19 @@ export function AssignBuilder({
                 >
                   {t.teacher_code} · {t.full_name}
                 </p>
+                {weekUnavailable.get(t.id) && (
+                  <p
+                    className={cn(
+                      "truncate text-[11px] font-medium",
+                      t.id === teacherId
+                        ? "text-violet-300"
+                        : "text-violet-600",
+                    )}
+                    title="Declared out on Mark Unavailable. Saving a class for these days still works, but warns first."
+                  >
+                    out {weekUnavailable.get(t.id)}
+                  </p>
+                )}
               </div>
             ))}
             {filteredTeachers.length === 0 && (

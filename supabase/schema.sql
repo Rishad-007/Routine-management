@@ -40,6 +40,7 @@ drop table if exists adjustment_batches cascade;
 drop table if exists routine_assignments cascade;
 drop table if exists routine_slots cascade;
 drop table if exists teacher_subjects cascade;
+drop table if exists teacher_unavailability cascade;
 drop table if exists teachers cascade;
 drop table if exists sections cascade;
 drop table if exists class_period_rules cascade;
@@ -135,6 +136,42 @@ create table teacher_subjects (
   primary key (teacher_id, subject_id)
 );
 
+-- ---------- TEACHER UNAVAILABILITY ----------
+-- Declares that a teacher is unavailable on a date, independent of whether a
+-- substitute was ever recorded for them. The absence report can only infer
+-- absence from adjustments.original_teacher_id, so a teacher who was away but
+-- whose classes were never covered is invisible to it, and a teacher declared
+-- out before the day's substitutions are entered is invisible to /admin/adjust.
+-- Keep the DDL identical to supabase/teacher-unavailability.sql (the
+-- non-destructive migration).
+--
+-- One row per period, so the save is idempotent on (date, teacher, period) and
+-- "is this teacher out at period P" is a set membership test.
+--
+-- is_whole_day separates the two scopes the UI exposes:
+--   true  -> out the whole day; consumed by /admin/adjust, /admin/assign,
+--            /admin/free-teachers, the absence report and the dashboard.
+--   false -> blocked at these periods ONLY; consumed by /admin/adjust alone,
+--            the one surface scoped to a calendar date. Per-period records are
+--            an operational note about a single day rather than an absence, so
+--            they deliberately do not feed the report.
+--
+-- A whole-day record is stored as all seven rows, so whole-day and per-period
+-- records are indistinguishable to isUnavailableAt() and only is_whole_day
+-- tells them apart for the wider surfaces.
+create table teacher_unavailability (
+  id uuid primary key default gen_random_uuid(),
+  absent_date date not null,
+  teacher_id uuid not null references teachers(id) on delete cascade,
+  reason text not null check (reason in ('on_leave','exam_duty','official_work','other')),
+  note text,
+  period_number int not null check (period_number between 1 and 7),
+  is_whole_day boolean not null default false,
+  created_by uuid references admins(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (absent_date, teacher_id, period_number)
+);
+
 -- ---------- ROUTINE SLOTS ----------
 -- One row represents one class-section at one weekly day/period.
 create table routine_slots (
@@ -212,6 +249,8 @@ create index idx_routine_assignments_teacher on routine_assignments(teacher_id);
 create index idx_adjustment_batches_date on adjustment_batches(adjust_date);
 create index idx_adjustment_assignments_teacher on adjustment_assignments(new_teacher_id);
 create index idx_teacher_subjects_subject on teacher_subjects(subject_id);
+create index idx_teacher_unavailability_date on teacher_unavailability(absent_date);
+create index idx_teacher_unavailability_teacher on teacher_unavailability(teacher_id);
 create unique index uk_teacher_class_section on teachers(class_teacher_section_id) where class_teacher_section_id is not null;
 
 -- =============================================
@@ -936,6 +975,9 @@ alter table routine_assignments enable row level security;
 alter table adjustment_batches enable row level security;
 alter table adjustment_assignments enable row level security;
 alter table settings enable row level security;
+-- Deliberately NO anon read policy: leave and absence data is admin-only. The
+-- admin pages read it through the service-role client, which bypasses RLS.
+alter table teacher_unavailability enable row level security;
 
 -- Read-only policies for anon (public client area)
 create policy "Public read classes" on classes for select to anon using (true);

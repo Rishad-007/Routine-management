@@ -62,6 +62,45 @@ export interface TeacherSubjectRow {
   subject_id: string;
 }
 
+/** Why a teacher is recorded as unavailable. Mirrors the CHECK on the column. */
+export type UnavailableReason =
+  | "on_leave"
+  | "exam_duty"
+  | "official_work"
+  | "other";
+
+export const UNAVAILABLE_REASONS: UnavailableReason[] = [
+  "on_leave",
+  "exam_duty",
+  "official_work",
+  "other",
+];
+
+/**
+ * A teacher declared unavailable on one date.
+ *
+ * One row per period rather than one row with a period array, so
+ * `unique (absent_date, teacher_id, period_number)` makes the save idempotent
+ * and "is this teacher out at period P" is a set membership test.
+ *
+ * `is_whole_day` is what separates the two scopes: when true the record was
+ * written for all seven periods and every surface honours it; when false the
+ * record blocks only these periods and is consumed by /admin/adjust alone, the
+ * one surface that is scoped to a calendar date. A whole-day record therefore
+ * looks like seven distinct periods to `isUnavailableAt`, which is intended.
+ */
+export interface TeacherUnavailabilityRow {
+  id: string;
+  absent_date: string;
+  teacher_id: string;
+  reason: UnavailableReason;
+  note: string | null;
+  period_number: number;
+  is_whole_day: boolean;
+  created_by: string | null;
+  created_at: string;
+}
+
 export const DAYS = [0, 1, 2, 3, 4] as const;
 export const DAY_LABELS: Record<number, string> = {
   0: "Sunday",

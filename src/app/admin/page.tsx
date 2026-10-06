@@ -37,6 +37,7 @@ import {
   getSetting,
   getSubjects,
   getTeachers,
+  getTeacherUnavailability,
 } from "@/lib/data";
 import { weeklyLoad } from "@/lib/conflicts";
 import {
@@ -127,6 +128,7 @@ export default async function AdminDashboardPage() {
     adjustments,
     allAdjustments,
     season,
+    unavailability,
   ] = await Promise.all([
     getClasses(),
     getSections(),
@@ -137,6 +139,7 @@ export default async function AdminDashboardPage() {
     getAdjustments(getSchoolToday()),
     getAllAdjustments(),
     getSetting("season"),
+    getTeacherUnavailability(),
   ]);
 
   const selectedSeason = (season as Season) ?? "summer";
@@ -169,6 +172,18 @@ export default async function AdminDashboardPage() {
     weekAdjustments
       .map((a) => a.new_teacher_id)
       .filter((id): id is string => Boolean(id)),
+  ).size;
+
+  // Whole-day declarations are the authoritative "out" signal for the week;
+  // adjustments already count towards weekSkipped / weekAbsentTeachers.
+  const weekDeclared = unavailability.filter(
+    (u) =>
+      u.is_whole_day &&
+      u.absent_date >= weekRange.start &&
+      u.absent_date <= weekRange.end,
+  );
+  const weekDeclaredDays = new Set(
+    weekDeclared.map((u) => `${u.teacher_id}:${u.absent_date}`),
   ).size;
 
   const teacherName = new Map(teachers.map((t) => [t.id, t.full_name]));
@@ -382,6 +397,12 @@ export default async function AdminDashboardPage() {
                 <p className="text-xs text-slate-400">
                   {weekSkipped} classes skipped
                 </p>
+                {weekDeclaredDays > 0 && (
+                  <p className="mt-0.5 text-xs font-medium text-violet-700">
+                    {weekDeclaredDays} whole-day declaration
+                    {weekDeclaredDays > 1 ? "s" : ""} this week
+                  </p>
+                )}
               </div>
               <div className="flex flex-col items-end gap-1.5">
                 <ArrowRight className="h-4 w-4 text-slate-300 transition-transform group-hover:translate-x-0.5" />

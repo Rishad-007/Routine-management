@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Users, Info, Eye, Ban } from "lucide-react";
+import { Search, Users, Info, Eye, Ban, CalendarX2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -38,6 +38,8 @@ export interface TeacherAvailability {
   where: string | null;
   /** Busy only because of a saved one-week cover, not their own class. */
   isCovering?: boolean;
+  /** Declared absence reason, set only on the `unavailable` list. */
+  note?: string | null;
 }
 
 export interface PeriodAvailability {
@@ -46,6 +48,12 @@ export interface PeriodAvailability {
   sectionsRunning: number;
   free: TeacherAvailability[];
   busy: TeacherAvailability[];
+  /**
+   * Declared out for the WHOLE day, so they are in none of the period lists.
+   * Identical across every period — the list exists per period only so the
+   * drill-down has somewhere to show it alongside Free and Busy.
+   */
+  unavailable: TeacherAvailability[];
 }
 
 interface Props {
@@ -56,6 +64,10 @@ interface Props {
   adjustedToday: boolean;
   /** Classes currently suspended — their teachers are counted as free. */
   suspendedClasses: { name: string; reason: string | null }[];
+  /** Declared absent on the anchored date: name plus "reason — note · date". */
+  unavailableTeachers: { name: string; note: string }[];
+  /** The calendar date the weekday was anchored to, for the banner. */
+  anchorDate: string;
   subjectLabels: Record<string, string>;
   roomLabels: Record<string, string>;
   routineSectionLabels: Record<string, string>;
@@ -70,6 +82,8 @@ export function FreeTeachersView({
   totalTeachers,
   adjustedToday,
   suspendedClasses,
+  unavailableTeachers,
+  anchorDate,
   subjectLabels,
   roomLabels,
   routineSectionLabels,
@@ -89,13 +103,22 @@ export function FreeTeachersView({
   );
 
   const filtered = useMemo(() => {
-    if (!selected) return { free: [], busy: [] };
+    if (!selected) return { free: [], busy: [], unavailable: [] };
     const q = query.trim().toLowerCase();
-    if (!q) return { free: selected.free, busy: selected.busy };
+    if (!q)
+      return {
+        free: selected.free,
+        busy: selected.busy,
+        unavailable: selected.unavailable,
+      };
     const match = (t: TeacherAvailability) =>
       t.fullName.toLowerCase().includes(q) ||
       t.code.toLowerCase().includes(q);
-    return { free: selected.free.filter(match), busy: selected.busy.filter(match) };
+    return {
+      free: selected.free.filter(match),
+      busy: selected.busy.filter(match),
+      unavailable: selected.unavailable.filter(match),
+    };
   }, [selected, query]);
 
   const routineTeacher = useMemo(() => {
@@ -103,7 +126,8 @@ export function FreeTeachersView({
     for (const p of periods) {
       const found =
         p.free.find((t) => t.id === routineTeacherId) ??
-        p.busy.find((t) => t.id === routineTeacherId);
+        p.busy.find((t) => t.id === routineTeacherId) ??
+        p.unavailable.find((t) => t.id === routineTeacherId);
       if (found) return found;
     }
     return null;
@@ -163,6 +187,22 @@ export function FreeTeachersView({
               .filter((c) => c.reason)
               .map((c) => `${c.name}: ${c.reason}`)
               .join(" · ")}
+          </span>
+        </div>
+      )}
+
+      {unavailableTeachers.length > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+          <CalendarX2 className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            <span className="font-semibold">
+              {unavailableTeachers.map((t) => t.name).join(", ")}
+            </span>{" "}
+            {unavailableTeachers.length === 1 ? "is" : "are"} declared
+            unavailable on {DAY_LABELS[day]} {anchorDate}, so{" "}
+            {unavailableTeachers.length === 1 ? "they" : "they"} are not
+            offered as free in any period.{" "}
+            {unavailableTeachers.map((t) => t.note).join(" · ")}
           </span>
         </div>
       )}
@@ -249,6 +289,13 @@ export function FreeTeachersView({
               tone="busy"
               teachers={filtered.busy}
               emptyLabel="Nobody is teaching in this period."
+              onOpenRoutine={openRoutine}
+            />
+            <Section
+              title={`Unavailable (${filtered.unavailable.length})`}
+              tone="unavailable"
+              teachers={filtered.unavailable}
+              emptyLabel="Nobody is declared unavailable on this day."
               onOpenRoutine={openRoutine}
             />
           </CardContent>
@@ -405,7 +452,7 @@ function Section({
   onOpenRoutine,
 }: {
   title: string;
-  tone: "free" | "busy";
+  tone: "free" | "busy" | "unavailable";
   teachers: TeacherAvailability[];
   emptyLabel: string;
   onOpenRoutine: (id: string) => void;
@@ -427,6 +474,8 @@ function Section({
               className={cn(
                 "group flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors hover:border-[#0d9488] hover:bg-[#0d9488]/5",
                 tone === "busy" && "opacity-60",
+                tone === "unavailable" &&
+                  "cursor-not-allowed border-violet-200 bg-violet-50/60 opacity-70 hover:border-violet-300 hover:bg-violet-50",
               )}
             >
               <div className="min-w-0">
@@ -445,12 +494,30 @@ function Section({
                       covering
                     </span>
                   )}
+                  {tone === "unavailable" && (
+                    <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700">
+                      unavailable
+                    </span>
+                  )}
                 </p>
                 <p className="truncate text-xs text-slate-500">
-                  {t.code} · today {t.dayCount} · week {t.weekTotal}
-                  {tone === "busy" && t.where ? ` · in ${t.where}` : ""}
-                  {tone === "busy" && t.isCovering ? " · this cover" : ""}
+                  {t.code}
+                  {tone !== "unavailable" && (
+                    <>
+                      {" "}
+                      · today {t.dayCount} · week {t.weekTotal}
+                      {tone === "busy" && t.where ? ` · in ${t.where}` : ""}
+                      {tone === "busy" && t.isCovering ? " · this cover" : ""}
+                    </>
+                  )}
                 </p>
+                {/* Load counts would imply they are teaching today — say why
+                    they are missing from Free instead. */}
+                {tone === "unavailable" && t.note && (
+                  <p className="truncate text-xs font-medium text-violet-600">
+                    {t.note}
+                  </p>
+                )}
               </div>
               <Eye
                 className={cn(

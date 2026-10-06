@@ -6,7 +6,8 @@ import {
   shortLabel,
   type ReportRange,
 } from "./report-range";
-import { DAY_LABELS, type AdjustmentRow, type ClassRow, type RoutineRow, type SectionRow, type SubjectRow, type TeacherRow } from "./types";
+import { UNAVAILABLE_REASON_LABELS } from "./unavailability";
+import { DAY_LABELS, type AdjustmentRow, type ClassRow, type RoutineRow, type SectionRow, type SubjectRow, type TeacherRow, type TeacherUnavailabilityRow, type UnavailableReason } from "./types";
 
 const MONTH_SHORT = [
   "Jan",
@@ -41,6 +42,12 @@ export interface TeacherAbsenceEntry {
   name: string;
   code: string;
   isOpen: boolean;
+  /**
+   * Days absent as INFERRED from substitutions — distinct dates carrying a
+   * class this teacher did not teach. Derivable from adjustments alone, so it
+   * stays adjustment-derived: a day where nothing was ever covered is by
+   * definition invisible to it. `declaredDays` is the authoritative count.
+   */
   daysAbsent: number;
   skipped: number;
   avgPerDay: number;
@@ -48,6 +55,14 @@ export interface TeacherAbsenceEntry {
   weekdayCounts: number[];
   subjectImpact: LabeledCount[];
   sectionImpact: LabeledCount[];
+  /**
+   * Days the admin DECLARED this teacher out for the whole day. Whole-day
+   * records only — a period-scoped note is about one day's covers, not an
+   * absence, and would inflate a report about who was OUT.
+   */
+  declaredDays: number;
+  /** Declared day counts per reason, e.g. "On leave — 3". */
+  declaredReasons: LabeledCount[];
 }
 
 export interface UnavailabilityReport {
@@ -56,6 +71,9 @@ export interface UnavailabilityReport {
   totalTeacherDays: number;
   totalSkipped: number;
   totalVacant: number;
+  /** Whole-day teacher-days declared across the range, including days where
+   *  no substitution was ever filed. */
+  totalDeclaredDays: number;
   averagePerDay: number;
   busiestDate: string | null;
   busiestCount: number;
@@ -197,6 +215,7 @@ function buildUnavailabilityReport(
   classes: ClassRow[],
   subjects: SubjectRow[],
   range: ReportRange,
+  unavailability: TeacherUnavailabilityRow[],
 ): UnavailabilityReport {
   const nameById = new Map(teachers.map((t) => [t.id, t.full_name]));
   const codeById = new Map(teachers.map((t) => [t.id, t.teacher_code]));
@@ -244,6 +263,8 @@ function buildUnavailabilityReport(
         weekdayCounts: [...EMPTY_WEEKDAY],
         subjectImpact: [],
         sectionImpact: [],
+        declaredDays: 0,
+        declaredReasons: [],
       };
       teacherMap.set(t, entry);
     }
@@ -252,12 +273,72 @@ function buildUnavailabilityReport(
     if (weekday !== null) entry.weekdayCounts[weekday]++;
   }
 
+  // Declared whole-day absences, merged after the adjustment pass so they can
+  // ADD teachers the adjustment pass never saw. That gap is the reason this
+  // feature exists: a teacher who was away but whose classes were never covered
+  // is a row in no adjustment-derived list at all, and here they become one.
+  //
+  // Whole-day only, and counted once per (teacher, date): a whole-day record is
+  // written as seven rows, so tallying rows would report seven absences for a
+  // single day out.
+  const declaredReasonLabels = new Map<string, string>(
+    (Object.keys(UNAVAILABLE_REASON_LABELS) as UnavailableReason[]).map((r) => [
+      r,
+      UNAVAILABLE_REASON_LABELS[r],
+    ]),
+  );
+  const declaredByTeacher = new Map<string, Map<string, string>>();
+  let totalDeclaredDays = 0;
+  for (const u of unavailability) {
+    if (!u.is_whole_day) continue;
+    if (!inRange(u.absent_date, range)) continue;
+    let byDate = declaredByTeacher.get(u.teacher_id);
+    if (!byDate) declaredByTeacher.set(u.teacher_id, (byDate = new Map()));
+    if (byDate.has(u.absent_date)) continue;
+    byDate.set(u.absent_date, u.reason);
+    totalDeclaredDays++;
+  }
+
+  for (const [teacherId, byDate] of declaredByTeacher) {
+    let entry = teacherMap.get(teacherId);
+    if (!entry) {
+      entry = {
+        teacherId,
+        name: nameById.get(teacherId) ?? "—",
+        code: codeById.get(teacherId) ?? "—",
+        isOpen: openById.get(teacherId) ?? false,
+        daysAbsent: 0,
+        skipped: 0,
+        avgPerDay: 0,
+        byDate: [],
+        weekdayCounts: [...EMPTY_WEEKDAY],
+        subjectImpact: [],
+        sectionImpact: [],
+        declaredDays: 0,
+        declaredReasons: [],
+      };
+      teacherMap.set(teacherId, entry);
+    }
+    entry.declaredDays = byDate.size;
+    const reasonCounts = new Map<string, number>();
+    for (const reason of byDate.values()) bump(reasonCounts, reason);
+    entry.declaredReasons = toLabeled(reasonCounts, declaredReasonLabels);
+  }
+
   const teachersSorted = Array.from(teacherMap.values())
     .map((e) => ({
       ...e,
       byDate: e.byDate.sort((a, b) => a.date.localeCompare(b.date)),
     }))
-    .sort((a, b) => b.skipped - a.skipped || a.name.localeCompare(b.name));
+    // Declared days lead: it is the authoritative "was this teacher out" signal,
+    // and it is 0 for every row when nothing has been declared — so a
+    // declaration-free install sorts exactly as it did before, by skipped.
+    .sort(
+      (a, b) =>
+        b.declaredDays - a.declaredDays ||
+        b.skipped - a.skipped ||
+        a.name.localeCompare(b.name),
+    );
 
   const totalSkipped = teachersSorted.reduce((sum, e) => sum + e.skipped, 0);
   const busiest = Array.from(dateTotals.entries()).sort(
@@ -301,6 +382,7 @@ function buildUnavailabilityReport(
     totalTeacherDays: teachersSorted.reduce((sum, e) => sum + e.byDate.length, 0),
     totalSkipped,
     totalVacant,
+    totalDeclaredDays,
     averagePerDay:
       countSchoolDays(range) > 0
         ? Math.round((totalSkipped / countSchoolDays(range)) * 10) / 10

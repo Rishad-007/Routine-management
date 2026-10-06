@@ -12,6 +12,7 @@ import {
   getSections,
   getSubjects,
   getTeachers,
+  getTeacherUnavailability,
 } from "@/lib/data";
 import {
   buildAdjustmentStatsReport,
@@ -80,12 +81,13 @@ const MONTH_SHORT = [
 ];
 
 const ABSENCE_COLS: PdfCol[] = [
-  { label: "Teacher", width: "28%" },
+  { label: "Teacher", width: "26%" },
   { label: "Type", width: "8%" },
-  { label: "Absent days", width: "9%", align: "right" },
-  { label: "Absence dates (classes skipped)", width: "32%" },
-  { label: "Classes skipped", width: "12%", align: "right" },
-  { label: "Avg / day", width: "11%", align: "right" },
+  { label: "Declared", width: "9%", align: "right" },
+  { label: "Absent days", width: "8%", align: "right" },
+  { label: "Absence dates (classes skipped)", width: "30%" },
+  { label: "Classes skipped", width: "11%", align: "right" },
+  { label: "Avg / day", width: "8%", align: "right" },
 ];
 
 const COVER_COLS: PdfCol[] = [
@@ -151,6 +153,9 @@ function AbsenceRows({ entries }: { entries: TeacherAbsenceEntry[] }) {
           cells={[
             `${e.name} (${e.code})`,
             e.isOpen ? "Open" : "Regular",
+            // Whole-day declarations only; a period-scoped note is not an
+            // absence and must not read as one on paper. Reasons are on screen.
+            String(e.declaredDays),
             String(e.daysAbsent),
             e.byDate.map(dateWithCount).join(", "),
             String(e.skipped),
@@ -297,6 +302,11 @@ function AbsenceSummaryGrid({ r }: { r: UnavailabilityReport }) {
     <View style={pdf.summaryGrid}>
       <SummaryCell label="Teachers affected" value={r.totalAffected} hint="unavailable at least once" />
       <SummaryCell label="Teacher-days absent" value={r.totalTeacherDays} />
+      <SummaryCell
+        label="Declared whole days"
+        value={r.totalDeclaredDays}
+        hint="incl. days with no cover filed"
+      />
       <SummaryCell label="Classes skipped" value={r.totalSkipped} />
       <SummaryCell
         label="Avg skipped / school day"
@@ -393,7 +403,7 @@ export async function GET(req: NextRequest) {
   const rawDate = searchParams.get("date") ?? undefined;
   const range = resolveReportParams(rawRange, rawDate);
 
-  const [adjustments, routines, teachers, subjects, sections, classes, rooms, adminNames] =
+  const [adjustments, routines, teachers, subjects, sections, classes, rooms, adminNames, unavailability] =
     await Promise.all([
       getAllAdjustments(),
       getRoutines(),
@@ -403,6 +413,7 @@ export async function GET(req: NextRequest) {
       getClasses(),
       getRooms(),
       getAdminNames(),
+      getTeacherUnavailability(),
     ]);
 
   const wantsAbsence = kind === "absence" || kind === "combined";
@@ -413,7 +424,7 @@ export async function GET(req: NextRequest) {
   );
 
   const absence = wantsAbsence
-    ? buildUnavailabilityReport(adjustments, teachers, sections, classes, subjects, range)
+    ? buildUnavailabilityReport(adjustments, teachers, sections, classes, subjects, range, unavailability)
     : null;
   const coverage = wantsCoverage
     ? buildAdjustmentStatsReport(adjustments, routines, teachers, subjects, range)

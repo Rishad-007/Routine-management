@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { CalendarDays, Search, TrendingUp, UserX, Users, XCircle } from "lucide-react";
+import { CalendarDays, CalendarX2, Search, TrendingUp, UserX, Users, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -35,7 +35,7 @@ import { DAY_LABELS } from "@/lib/types";
 import type { UnavailabilityReport, TeacherAbsenceEntry } from "@/lib/reports";
 import { ReportStatCards } from "./report-stats-cards";
 
-type SortKey = "skipped" | "daysAbsent" | "avgPerDay" | "name";
+type SortKey = "skipped" | "daysAbsent" | "avgPerDay" | "declaredDays" | "name";
 
 interface Props {
   report: UnavailabilityReport;
@@ -63,11 +63,16 @@ export function UnavailableTeachersReport({ report }: Props) {
       if (sortKey === "name") return a.name.localeCompare(b.name);
       if (sortKey === "daysAbsent") return b.daysAbsent - a.daysAbsent;
       if (sortKey === "avgPerDay") return b.avgPerDay - a.avgPerDay;
+      if (sortKey === "declaredDays") return b.declaredDays - a.declaredDays;
       return b.skipped - a.skipped;
     });
   }, [report.teachers, query, sortKey]);
 
-  const isEmpty = rows.length === 0 && report.totalSkipped === 0 && report.totalVacant === 0;
+  const isEmpty =
+    rows.length === 0 &&
+    report.totalSkipped === 0 &&
+    report.totalVacant === 0 &&
+    report.totalDeclaredDays === 0;
 
   const topTeachers = report.teachers
     .slice(0, 8)
@@ -109,6 +114,13 @@ export function UnavailableTeachersReport({ report }: Props) {
             sub: "covered with no fixed teacher",
             icon: UserX,
             accent: "violet",
+          },
+          {
+            label: "Declared whole days",
+            value: report.totalDeclaredDays,
+            sub: "marked unavailable for the full day",
+            icon: CalendarX2,
+            accent: "indigo",
           },
         ]}
       />
@@ -288,6 +300,7 @@ export function UnavailableTeachersReport({ report }: Props) {
             >
               <option value="skipped">Most skipped</option>
               <option value="daysAbsent">Most absent days</option>
+              <option value="declaredDays">Most declared</option>
               <option value="avgPerDay">Highest avg/day</option>
               <option value="name">Name A–Z</option>
             </select>
@@ -303,6 +316,7 @@ export function UnavailableTeachersReport({ report }: Props) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Teacher</TableHead>
+                  <TableHead>Declared</TableHead>
                   <TableHead>Absent days</TableHead>
                   <TableHead>Absence dates</TableHead>
                   <TableHead className="text-right">Classes skipped</TableHead>
@@ -315,6 +329,9 @@ export function UnavailableTeachersReport({ report }: Props) {
                   <TableRow key={t.teacherId}>
                     <TableCell>
                       <TeacherCell entry={t} />
+                    </TableCell>
+                    <TableCell>
+                      <DeclaredCell entry={t} />
                     </TableCell>
                     <TableCell className="font-semibold text-[#1e3a5f]">
                       {t.daysAbsent}
@@ -361,6 +378,24 @@ function TeacherCell({ entry }: { entry: TeacherAbsenceEntry }) {
         </Badge>
       )}
       <span className="text-xs text-slate-400">{entry.code}</span>
+    </div>
+  );
+}
+
+function DeclaredCell({ entry }: { entry: TeacherAbsenceEntry }) {
+  if (entry.declaredDays === 0) return <span className="text-slate-400">—</span>;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <span className="font-semibold text-violet-700">{entry.declaredDays}</span>
+      {entry.declaredReasons.map((r) => (
+        <span
+          key={r.label}
+          className="inline-flex items-center gap-0.5 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700"
+        >
+          {r.label}
+          {r.count > 1 && <b>×{r.count}</b>}
+        </span>
+      ))}
     </div>
   );
 }

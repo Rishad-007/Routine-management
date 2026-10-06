@@ -12,8 +12,17 @@ import {
   getClassPeriodRules,
   getClasses,
   getSections,
+  getTeacherUnavailability,
   type PagedQuery,
 } from "@/lib/data";
+import { getSchoolWeekRange } from "@/lib/periods";
+import {
+  isWholeDayUnavailable,
+  reasonLabel,
+  unavailableEntry,
+  unavailabilityIndex,
+  weekDateForDay,
+} from "@/lib/unavailability";
 import { DAY_LABELS, type RoutineRow } from "@/lib/types";
 
 export type AssignmentRole = "primary" | "tag";
@@ -75,10 +84,11 @@ export async function assignTeacherPeriod(
   if (!Number.isInteger(period) || period < 1 || period > 7)
     return { error: "Invalid period." };
 
-  const [rules, sections, classes] = await Promise.all([
+  const [rules, sections, classes, unavailability] = await Promise.all([
     getClassPeriodRules(),
     getSections(),
     getClasses(),
+    getTeacherUnavailability(),
   ]);
 
   const section = sections.find((s) => s.id === sectionId);
@@ -227,6 +237,30 @@ export async function assignTeacherPeriod(
   });
 
   const warnings: AssignWarning[] = [];
+
+  // Declared unavailability is DATE-scoped but this screen is WEEKDAY-scoped,
+  // so the weekday is anchored to this week's copy of it — the same date
+  // /admin/free-teachers uses. A record filed for a different Thursday is not
+  // this Thursday's problem.
+  //
+  // A warning rather than the hard block /admin/adjust applies: this action
+  // rewrites the permanent weekly timetable, where being out on one particular
+  // Thursday means nothing about the other weeks. Whole-day only — a
+  // period-scoped note is about a single day's covers, not an absence.
+  const anchorDate = weekDateForDay(getSchoolWeekRange().start, day);
+  const unavailIndex = unavailabilityIndex(unavailability, anchorDate);
+  if (isWholeDayUnavailable(unavailIndex, teacherId)) {
+    const entry = unavailableEntry(unavailIndex, teacherId);
+    warnings.push({
+      level: "red",
+      detail: `${teacherName} is marked unavailable on ${DAY_LABELS[day]} ${
+        anchorDate
+      } — ${reasonLabel(entry?.reason ?? "other")}${
+        entry?.note ? ` (${entry.note})` : ""
+      }. This is written into the permanent weekly timetable; only save if it still stands.`,
+    });
+  }
+
   const load = teacherDayLoadIndexed(
     buildRoutineIndex(simulated),
     teacherId,

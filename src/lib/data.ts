@@ -9,6 +9,7 @@ import {
   type SubjectRow,
   type TeacherRow,
   type TeacherSubjectRow,
+  type TeacherUnavailabilityRow,
   type RoomRow,
   type RoutineRow,
   type AdjustmentRow,
@@ -190,6 +191,31 @@ export const getTeacherSubjects = unstable_cache(
   },
   ["teacher-subjects"],
   { tags: ["teacher-subjects"], revalidate: CACHE_SECONDS },
+);
+
+/**
+ * Every teacher-unavailability record, past and future.
+ *
+ * Cached under its own tag so a save can drop it directly, rather than the
+ * broad `revalidatePath` sweep doing it by coincidence.
+ *
+ * Paged rather than a plain select: a whole-day record is seven rows, so this
+ * grows an order of magnitude faster than it looks and an unbounded select would
+ * silently truncate at 1000 and make a teacher read as free at the periods
+ * beyond the cut.
+ */
+export const getTeacherUnavailability = unstable_cache(
+  async (): Promise<TeacherUnavailabilityRow[]> => {
+    const client = db();
+    return fetchAllRows<TeacherUnavailabilityRow>(
+      () =>
+        client
+          .from("teacher_unavailability")
+          .select("*", { count: "exact" }) as unknown as PagedQuery<TeacherUnavailabilityRow>,
+    );
+  },
+  ["teacher-unavailability"],
+  { tags: ["unavailability"], revalidate: CACHE_SECONDS },
 );
 
 export const getRoutines = unstable_cache(

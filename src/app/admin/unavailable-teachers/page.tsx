@@ -5,6 +5,7 @@ import {
   getSections,
   getSubjects,
   getTeachers,
+  getTeacherUnavailability,
 } from "@/lib/data";
 import { resolveReportParams } from "@/lib/report-range";
 import { buildUnavailabilityReport } from "@/lib/reports";
@@ -25,13 +26,14 @@ export default async function UnavailableTeachersPage({
   const rawDate = Array.isArray(params.date) ? params.date[0] : params.date;
   const range = resolveReportParams(rawRange, rawDate);
 
-  const [adjustments, teachers, sections, classes, subjects] =
+  const [adjustments, teachers, sections, classes, subjects, unavailability] =
     await Promise.all([
       getAllAdjustments(),
       getTeachers(),
       getSections(),
       getClasses(),
       getSubjects(),
+      getTeacherUnavailability(),
     ]);
 
   const report = buildUnavailabilityReport(
@@ -41,6 +43,7 @@ export default async function UnavailableTeachersPage({
     classes,
     subjects,
     range,
+    unavailability,
   );
 
   return (

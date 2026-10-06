@@ -8,6 +8,7 @@ import {
   getSubjects,
   getTeacherSubjects,
   getTeachers,
+  getTeacherUnavailability,
 } from "@/lib/data";
 import { AssignBuilder } from "@/components/admin/assign/assign-builder";
 import { Ban } from "lucide-react";
@@ -31,6 +32,7 @@ export default async function AssignPage({
     teacherSubjects,
     routines,
     rules,
+    unavailability,
   ] = await Promise.all([
     getTeachers(),
     getSections(),
@@ -40,6 +42,7 @@ export default async function AssignPage({
     getTeacherSubjects(),
     getRoutines(),
     getClassPeriodRules(),
+    getTeacherUnavailability(),
   ]);
 
   return (
@@ -79,6 +82,7 @@ export default async function AssignPage({
         routines={routines}
         rules={rules}
         initialTeacherId={params.teacher ?? null}
+        unavailability={unavailability}
       />
     </div>
   );
