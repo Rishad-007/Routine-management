@@ -287,6 +287,11 @@ export function AdjustBuilder({
     [subjects],
   );
 
+  const roomMap = useMemo(
+    () => new Map(rooms.map((r) => [r.id, r])),
+    [rooms],
+  );
+
   const adjustmentHistory = useMemo(() => {
     const groups = new Map<string, AdjustmentRow[]>();
     for (const adjustment of adjustments) {
@@ -1710,6 +1715,12 @@ export function AdjustBuilder({
                           ? teachers.find((t) => t.id === cell.tagTeacherId)
                               ?.full_name
                           : null;
+                        // Room of this session. Adjustments don't move primary
+                        // rooms, so the base routine's room is current; tag-only
+                        // periods fall back to the tag session's room.
+                        const cellRoom = roomMap.get(
+                          cell.originalRoomId ?? cell.tagRoomId ?? "",
+                        )?.name;
 
                         return (
                           <tr
@@ -1742,8 +1753,15 @@ export function AdjustBuilder({
                               )}
                             </td>
                             <td className="border border-slate-200 px-3 py-2">
-                              <span className="text-base font-medium text-[#1e3a5f]">
-                                {cell.className}-{cell.sectionName}
+                              <span className="flex flex-wrap items-baseline gap-x-1">
+                                <span className="text-base font-medium text-[#1e3a5f]">
+                                  {cell.className}-{cell.sectionName}
+                                </span>
+                                {cellRoom && (
+                                  <span className="text-sm text-slate-400">
+                                    · {cellRoom}
+                                  </span>
+                                )}
                               </span>
                             </td>
                             <td className="border border-slate-200 px-3 py-2">
