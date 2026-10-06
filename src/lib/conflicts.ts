@@ -317,6 +317,28 @@ export function dayCountIndexed(
   return index.byTeacherDay.get(teacherId)?.get(day)?.size ?? 0;
 }
 
+/** Shared empty set so the common "no classes that day" case allocates nothing. */
+const NO_PERIODS: ReadonlySet<number> = new Set();
+
+/**
+ * Indexed set of periods a teacher occupies on a given day.
+ *
+ * Tag sessions are included, matching `isBusyIndexed` and the DB trigger, so a
+ * grid built from this can never contradict the double-booking check. O(1): it
+ * reads the index built once in `buildRoutineIndex` rather than rescanning
+ * routines per teacher.
+ *
+ * Treat the result as read-only. The empty case is a shared instance, so a
+ * caller that mutated it would corrupt the answer for every other teacher.
+ */
+export function busyPeriodsIndexed(
+  index: RoutineIndex,
+  teacherId: string,
+  day: number,
+): ReadonlySet<number> {
+  return index.byTeacherDay.get(teacherId)?.get(day) ?? NO_PERIODS;
+}
+
 /** Indexed `longestConsecutiveStretch` — same tiffin rule. */
 export function stretchIndexed(
   index: RoutineIndex,

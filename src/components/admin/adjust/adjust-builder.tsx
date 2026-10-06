@@ -56,6 +56,7 @@ import {
   applyAdjustmentsToRoutines,
   applyWeekAdjustmentsToRoutines,
   buildRoutineIndex,
+  busyPeriodsIndexed,
   isCoveringIndexed,
   dayCountIndexed,
   isBusyIndexed,
@@ -105,6 +106,14 @@ interface Props {
  */
 function normalizeSearch(value: string | null | undefined) {
   return (value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/** Tooltip text for a period a teacher is occupied at, per assignment role. */
+interface PeriodLabels {
+  /** Label from their primary row — preferred, since that is the real clash. */
+  primary?: string;
+  /** Label from their tag row, used only when they hold no primary role here. */
+  tag?: string;
 }
 
 interface DayCell {
@@ -721,6 +730,123 @@ export function AdjustBuilder({
         };
       })
       .sort((a, b) => a.period - b.period);
+  };
+
+  // What each teacher is actually teaching at each occupied period on the active
+  // day, as a tooltip label ("Class 8-Mashaeli · Mathematics"). Built in one pass
+  // over the day's rows rather than per card, so the period strip below costs
+  // O(1) per cell instead of rescanning every routine per teacher.
+  const teacherPeriodLabels = useMemo(() => {
+    const map = new Map<string, Map<number, PeriodLabels>>();
+    if (dayIndex === null) return map;
+
+    const sectionLabels = new Map(
+      sections.map((s) => {
+        const cls = classes.find((c) => c.id === s.class_id);
+        return [s.id, cls ? `${cls.name}-${s.name}` : s.name] as const;
+      }),
+    );
+
+    for (const r of pendingRoutines) {
+      if (r.day !== dayIndex || !r.teacher_id) continue;
+
+      let byPeriod = map.get(r.teacher_id);
+      if (!byPeriod) map.set(r.teacher_id, (byPeriod = new Map()));
+
+      const subjectName = r.subject_id
+        ? subjectMap.get(r.subject_id)?.name
+        : undefined;
+      const label = `${sectionLabels.get(r.section_id) ?? "—"} · ${subjectName ?? "—"}`;
+
+      const slot = byPeriod.get(r.period_number) ?? {};
+      // Prefer the primary row when one teacher holds both roles in a cell,
+      // matching how buildTeacherRoutinePreview resolves its rowAt.
+      if (r.is_tag) slot.tag ??= label;
+      else slot.primary = label;
+      byPeriod.set(r.period_number, slot);
+    }
+
+    return map;
+  }, [pendingRoutines, dayIndex, sections, classes, subjectMap]);
+
+  // Per-period free/busy strip for a teacher card: one cell per period, green
+  // when they are free and red when they already hold a class. Reads the same
+  // pending index the load counts do, so it repaints the moment an assignment is
+  // made, before anything is saved.
+  //
+  // Tiffin gets a neutral cell rather than a green or red one: it is a break
+  // between P4 and P5, so no teacher is free or busy then and colouring it would
+  // invent a class hour that does not exist.
+  const teacherPeriodStrip = (teacherId: string) => {
+    if (dayIndex === null) return null;
+
+    const busy = busyPeriodsIndexed(pendingIndex, teacherId, dayIndex);
+    const labels = teacherPeriodLabels.get(teacherId);
+
+    const freeAt: string[] = [];
+    const busyAt: string[] = [];
+    for (const p of PERIOD_ORDER) {
+      (busy.has(p) ? busyAt : freeAt).push(`P${p}`);
+    }
+
+    return (
+      <div
+        role="img"
+        aria-label={`Free at ${freeAt.join(", ") || "no periods"}. Busy at ${
+          busyAt.join(", ") || "no periods"
+        }.`}
+        className="mt-2 flex items-center gap-1"
+      >
+        {PERIOD_ORDER.flatMap((period) => {
+          // Tiffin sits BETWEEN P4 and P5, so the T cell is emitted ahead of
+          // period 5 rather than in place of it — returning early here used to
+          // swallow P5 entirely and leave the strip one cell short.
+          const cells = [];
+
+          if (period === TIFFIN_AFTER_PERIOD + 1) {
+            cells.push(
+              <span
+                key="tiffin"
+                title="Tiffin — no classes"
+                className="flex h-6 w-6 items-center justify-center rounded bg-amber-100 text-[10px] font-semibold text-amber-700"
+              >
+                T
+              </span>,
+            );
+          }
+
+          const isBusy = busy.has(period);
+          const detail = labels?.get(period);
+          // A cell occupied only as the second (tag) teacher is still a clash —
+          // the DB trigger counts it — but the tooltip says so, since that class
+          // can be freed by dropping the tag rather than the whole period.
+          const tagOnly = !detail?.primary && !!detail?.tag;
+
+          cells.push(
+            <span
+              key={period}
+              title={
+                isBusy
+                  ? `P${period} · ${detail?.primary ?? detail?.tag ?? "Busy"}${
+                      tagOnly ? " · tag" : ""
+                    }`
+                  : `P${period} · Free`
+              }
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded text-[10px] font-semibold",
+                isBusy
+                  ? "bg-red-100 text-red-700"
+                  : "bg-emerald-100 text-emerald-700",
+              )}
+            >
+              {period}
+            </span>,
+          );
+
+          return cells;
+        })}
+      </div>
+    );
   };
 
   const handleCellClick = (
@@ -2151,6 +2277,7 @@ export function AdjustBuilder({
                                 </span>
                               )}
                             </div>
+                            {teacherPeriodStrip(t.id)}
                           </button>
                           <Button
                             type="button"
