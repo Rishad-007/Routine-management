@@ -763,6 +763,14 @@ export function AdjustBuilder({
     [searchedSheetTeachers],
   );
 
+  // How many teachers the period-scoped exclusion dropped from BOTH buckets.
+  // Hiding them silently would leave "where did he go?" unanswerable, so the
+  // sheet counts them out loud instead.
+  const excludedSheetCount = useMemo(
+    () => searchedSheetTeachers.filter((t) => t.unavailable).length,
+    [searchedSheetTeachers],
+  );
+
   // The busy (disabled) section can expand a teacher to see the classes THEY
   // teach on the selected day — i.e. why they are blocked at this period.
   const teacherDaySchedule = (teacherId: string) => {
@@ -2088,6 +2096,18 @@ export function AdjustBuilder({
               {sheetTab === "tag"
                 ? `Tag session — Period ${sheetPeriod}`
                 : `Assign teacher — Period ${sheetPeriod}`}
+              {/* Which class is being covered — same format the grid row
+                  uses, so the sheet can't be mistaken for another cell. */}
+              {currentSheetCell && (
+                <>
+                  {" · "}
+                  {currentSheetCell.className}-{currentSheetCell.sectionName}
+                </>
+              )}
+              {/* The date decides who is unavailability-blocked, so it belongs
+                  in the title: a mark on another day silently does not apply
+                  here, and with no date shown that reads as a bug. */}
+              {dayIndex !== null && <> · {DAY_LABEL_LIST[dayIndex]}</>} · {date}
             </DialogTitle>
             <DialogDescription>
               {sheetTab === "tag"
@@ -2234,6 +2254,21 @@ export function AdjustBuilder({
                   {busySheetTeachers.length}
                 </strong>{" "}
                 busy in P{sheetPeriod}
+                {excludedSheetCount > 0 && (
+                  <>
+                    {" "}
+                    ·{" "}
+                    <strong className="text-violet-700">
+                      {excludedSheetCount}
+                    </strong>{" "}
+                    <span
+                      className="text-violet-600"
+                      title={`Marked unavailable in period ${sheetPeriod} — hidden from both lists`}
+                    >
+                      unavailable excluded
+                    </span>
+                  </>
+                )}
               </span>
               <span className="text-[11px] text-slate-400">
                 {teachers.length} teachers total
@@ -2300,11 +2335,28 @@ export function AdjustBuilder({
                             className="min-w-0 flex-1 text-left"
                           >
                             <div className="flex items-center justify-between">
-                              <span className="flex items-center gap-1.5 font-medium text-slate-800">
-                                {t.full_name}
-                                <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                                  free
-                                </span>
+                                <span className="flex items-center gap-1.5 font-medium text-slate-800">
+                                  {t.full_name}
+                                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                                    free
+                                  </span>
+                                  {/* Marked out at SOME periods of this date,
+                                      just not the one the sheet is open on —
+                                      so he legitimately appears here. Saying
+                                      which periods keeps "he's unavailable,
+                                      why is he listed?" from reading as a bug. */}
+                                  {t.unavailEntry && t.unavailPeriods.length > 0 && (
+                                    <span
+                                      className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium text-violet-700"
+                                      title={`${reasonLabel(t.unavailEntry.reason)}${
+                                        t.unavailEntry.note
+                                          ? ` — ${t.unavailEntry.note}`
+                                          : ""
+                                      } · unavailable at P${t.unavailPeriods.join(", P")} on ${date}`}
+                                    >
+                                      Out P{t.unavailPeriods.join(",")}
+                                    </span>
+                                  )}
                                 {/* Already the recorded substitute for this
                                     slot: selecting them is a no-op edit, so say
                                     so instead of letting it look like a change. */}

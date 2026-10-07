@@ -94,6 +94,13 @@ export interface TeacherCoverageEntry {
   daysCovered: number;
   fixedWeekly: number;
   /**
+   * The golden weekly base scaled to the report's range: day = /5, week = as-is,
+   * month = *4, year = *48. This is the "Fixed class" column.
+   */
+  fixedInRange: number;
+  /** fixedInRange + extraClasses for the same range — the "Total class" column. */
+  totalInRange: number;
+  /**
    * Classes taken in a period the teacher was NOT already timetabled to teach —
    * the genuinely additional periods, which is what "extra work" means to a
    * class teacher. A substitution handed to someone who is already in that period
@@ -128,6 +135,22 @@ export interface AdjustmentStatsReport {
 
 function inRange(date: string, range: ReportRange): boolean {
   return date >= range.start && date <= range.end;
+}
+
+/**
+ * Scale the fixed weekly load (the golden base) to a report range:
+ * day = /5 (one school day), week = as-is, month = *4, year = *48 (4 weeks * 12).
+ */
+function scaleFixedWeekly(
+  fixedWeekly: number,
+  granularity: ReportRange["granularity"],
+): number {
+  let scaled: number;
+  if (granularity === "day") scaled = fixedWeekly / 5;
+  else if (granularity === "month") scaled = fixedWeekly * 4;
+  else if (granularity === "year") scaled = fixedWeekly * 48;
+  else scaled = fixedWeekly;
+  return Math.round(scaled * 10) / 10;
 }
 
 function bump(map: Map<string, number>, key: string, delta = 1): void {
@@ -448,6 +471,8 @@ function buildAdjustmentStatsReport(
         tagCovered: 0,
         daysCovered: 0,
         fixedWeekly: 0,
+        fixedInRange: 0,
+        totalInRange: 0,
         extraClasses: 0,
         daysWithExtra: 0,
         byDate: [],
@@ -486,14 +511,20 @@ function buildAdjustmentStatsReport(
   }
 
   const teachersSorted = Array.from(teacherMap.values())
-    .map((e) => ({
-      ...e,
-      byDate: e.byDate.sort((a, b) => a.date.localeCompare(b.date)),
-      daysCovered: e.byDate.length,
-      daysWithExtra: extraDays.get(e.teacherId)?.size ?? 0,
-      fixedWeekly: weeklyLoad(routines, e.teacherId).total,
-      subjects: toLabeled(subjectByTeacher.get(e.teacherId) ?? new Map(), subjectName),
-    }))
+    .map((e) => {
+      const fixedWeekly = weeklyLoad(routines, e.teacherId).total;
+      const fixedInRange = scaleFixedWeekly(fixedWeekly, range.granularity);
+      return {
+        ...e,
+        byDate: e.byDate.sort((a, b) => a.date.localeCompare(b.date)),
+        daysCovered: e.byDate.length,
+        daysWithExtra: extraDays.get(e.teacherId)?.size ?? 0,
+        fixedWeekly,
+        fixedInRange,
+        totalInRange: fixedInRange + e.extraClasses,
+        subjects: toLabeled(subjectByTeacher.get(e.teacherId) ?? new Map(), subjectName),
+      };
+    })
     .sort(
       (a, b) =>
         b.extraClasses - a.extraClasses ||

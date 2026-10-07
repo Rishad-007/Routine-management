@@ -36,7 +36,7 @@ import { DAY_LABELS } from "@/lib/types";
 import type { AdjustmentStatsReport, TeacherCoverageEntry } from "@/lib/reports";
 import { ReportStatCards } from "./report-stats-cards";
 
-type SortKey = "covered" | "fixed" | "diff" | "daysCovered" | "name";
+type SortKey = "total" | "adjusted" | "fixed" | "name";
 
 interface Props {
   report: AdjustmentStatsReport;
@@ -48,13 +48,14 @@ const TOOLTIP_STYLE = {
   fontSize: 12,
 };
 
-function diffOf(t: TeacherCoverageEntry): number {
-  return t.extraClasses;
+/** Fixed loads can be fractional in the Daily view (weekly base / 5). */
+function fmt(n: number): number | string {
+  return Number.isInteger(n) ? n : n.toFixed(1);
 }
 
 export function AdjustmentStatsReport({ report }: Props) {
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("diff");
+  const [sortKey, setSortKey] = useState<SortKey>("total");
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -66,10 +67,9 @@ export function AdjustmentStatsReport({ report }: Props) {
     }
     return [...list].sort((a, b) => {
       if (sortKey === "name") return a.name.localeCompare(b.name);
-      if (sortKey === "covered") return b.covered - a.covered;
-      if (sortKey === "daysCovered") return b.daysCovered - a.daysCovered;
-      if (sortKey === "diff") return diffOf(b) - diffOf(a);
-      return a.fixedWeekly - b.fixedWeekly;
+      if (sortKey === "adjusted") return b.extraClasses - a.extraClasses;
+      if (sortKey === "fixed") return b.fixedInRange - a.fixedInRange;
+      return b.totalInRange - a.totalInRange;
     });
   }, [report.teachers, query, sortKey]);
 
@@ -339,10 +339,9 @@ export function AdjustmentStatsReport({ report }: Props) {
               onChange={(e) => setSortKey(e.target.value as SortKey)}
               className="h-9 rounded-lg border border-slate-200 bg-transparent px-2 text-xs text-slate-600 outline-none"
             >
-              <option value="covered">Highest coverage</option>
-              <option value="diff">Highest extra load</option>
-              <option value="fixed">Highest fixed load</option>
-              <option value="daysCovered">Most days covering</option>
+              <option value="total">Sort by total class</option>
+              <option value="adjusted">Sort by adjusted class</option>
+              <option value="fixed">Sort by fixed class</option>
               <option value="name">Name A–Z</option>
             </select>
           </div>
@@ -357,13 +356,9 @@ export function AdjustmentStatsReport({ report }: Props) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Teacher</TableHead>
-                  <TableHead className="text-right">Classes covered</TableHead>
-                  <TableHead className="text-right">Extra classes</TableHead>
-                  <TableHead className="text-right">Fixed / week</TableHead>
-                  <TableHead className="text-right">Days</TableHead>
-                  <TableHead className="text-right">Primary</TableHead>
-                  <TableHead className="text-right">Tag</TableHead>
-                  <TableHead>Subjects covered</TableHead>
+                  <TableHead className="text-right">Fixed class</TableHead>
+                  <TableHead className="text-right">Adjusted class</TableHead>
+                  <TableHead className="text-right">Total class</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -372,26 +367,14 @@ export function AdjustmentStatsReport({ report }: Props) {
                     <TableCell>
                       <TeacherCell entry={t} />
                     </TableCell>
+                    <TableCell className="text-right text-slate-600">
+                      {fmt(t.fixedInRange)}
+                    </TableCell>
+                    <TableCell className="text-right text-slate-600">
+                      {t.extraClasses}
+                    </TableCell>
                     <TableCell className="text-right font-bold text-[#1e3a5f]">
-                      {t.covered}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DiffBadge diff={diffOf(t)} />
-                    </TableCell>
-                    <TableCell className="text-right text-slate-600">
-                      {t.fixedWeekly}
-                    </TableCell>
-                    <TableCell className="text-right text-slate-600">
-                      {t.daysCovered}
-                    </TableCell>
-                    <TableCell className="text-right text-slate-600">
-                      {t.primaryCovered}
-                    </TableCell>
-                    <TableCell className="text-right text-slate-600">
-                      {t.tagCovered}
-                    </TableCell>
-                    <TableCell>
-                      <SubjectChips labels={t.subjects.map((s) => s.label)} />
+                      {fmt(t.totalInRange)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -399,26 +382,14 @@ export function AdjustmentStatsReport({ report }: Props) {
             </Table>
           )}
           <p className="mt-3 text-xs text-slate-400">
-            &quot;Extra classes&quot; = periods covered when the teacher was not already
-            timetabled to teach, so it counts genuinely additional work. A
-            substitution handed to someone already in that period appears under
-            &quot;Classes covered&quot; only.
+            Fixed class = the teacher&apos;s fixed weekly timetable scaled to this
+            range (daily ÷5, weekly ×1, monthly ×4, yearly ×48). Adjusted class
+            = classes covered outside the teacher&apos;s own timetable. Total =
+            Fixed + Adjusted.
           </p>
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-function DiffBadge({ diff }: { diff: number }) {
-  if (diff === 0) return <span className="text-slate-400">0</span>;
-  return (
-    <Badge
-      variant="outline"
-      className="border-rose-200 bg-rose-50 px-1.5 text-[10px] font-semibold text-rose-700"
-    >
-      {`+${diff}`}
-    </Badge>
   );
 }
 
@@ -435,29 +406,6 @@ function TeacherCell({ entry }: { entry: TeacherCoverageEntry }) {
         </Badge>
       )}
       <span className="text-xs text-slate-400">{entry.code}</span>
-    </div>
-  );
-}
-
-function SubjectChips({ labels }: { labels: string[] }) {
-  const visible = labels.slice(0, 2);
-  if (visible.length === 0) return <span className="text-slate-400">—</span>;
-  return (
-    <div className="flex max-w-56 flex-wrap gap-1">
-      {visible.map((label) => (
-        <Badge
-          key={label}
-          variant="outline"
-          className="border-slate-200 bg-slate-50 px-1.5 text-[10px] font-medium text-slate-600"
-        >
-          {label}
-        </Badge>
-      ))}
-      {labels.length > visible.length && (
-        <span className="text-[10px] text-slate-400">
-          +{labels.length - visible.length} more
-        </span>
-      )}
     </div>
   );
 }

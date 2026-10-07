@@ -11,6 +11,11 @@ import {
   filterSuspendedRoutines,
 } from "@/lib/suspensions";
 import {
+  reasonLabel,
+  unavailableEntry,
+  unavailabilityIndex,
+} from "@/lib/unavailability";
+import {
   DocFooter,
   DocHeader,
   EmptyState,
@@ -27,6 +32,7 @@ import type {
   RoomRow,
   RoutineRow,
   AdjustmentRow,
+  TeacherUnavailabilityRow,
 } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -66,22 +72,31 @@ async function fetchReportData(date: string) {
 
   // One weekday of `routines` is ~600 rows today and grows with the section
   // count — page it so the report never silently loses periods.
-  const [clsRes, secRes, teaRes, subRes, roomRes, adjRes, dayRoutines] =
-    await Promise.all([
-      admin.from("classes").select("*").order("sort_order", { ascending: true }),
-      admin.from("sections").select("*"),
-      admin.from("teachers").select("*").order("full_name"),
-      admin.from("subjects").select("*"),
-      admin.from("rooms").select("*"),
-      admin.from("adjustments").select("*").eq("adjust_date", date),
-      fetchAllRows<RoutineRow>(
-        () =>
-          admin
-            .from("routines")
-            .select("*", { count: "exact" })
-            .eq("day", dayIndex) as unknown as PagedQuery<RoutineRow>,
-      ),
-    ]);
+  const [
+    clsRes,
+    secRes,
+    teaRes,
+    subRes,
+    roomRes,
+    adjRes,
+    unavailRes,
+    dayRoutines,
+  ] = await Promise.all([
+    admin.from("classes").select("*").order("sort_order", { ascending: true }),
+    admin.from("sections").select("*"),
+    admin.from("teachers").select("*").order("full_name"),
+    admin.from("subjects").select("*"),
+    admin.from("rooms").select("*"),
+    admin.from("adjustments").select("*").eq("adjust_date", date),
+    admin.from("teacher_unavailability").select("*").eq("absent_date", date),
+    fetchAllRows<RoutineRow>(
+      () =>
+        admin
+          .from("routines")
+          .select("*", { count: "exact" })
+          .eq("day", dayIndex) as unknown as PagedQuery<RoutineRow>,
+    ),
+  ]);
 
   const classes = (clsRes.data ?? []) as ClassRow[];
   const sections = (secRes.data ?? []) as SectionRow[];
@@ -151,13 +166,25 @@ async function fetchReportData(date: string) {
     else groups.set(key, [r]);
   }
 
+  // Why each teacher is out, from the Mark Unavailable page — the heading
+  // prints it right after the name so the sheet says more than "unavailable".
+  const unavailability = unavailabilityIndex(
+    (unavailRes.data ?? []) as TeacherUnavailabilityRow[],
+    date,
+  );
+
   const groupList = Array.from(groups.entries())
     .map(([id, groupRows]) => {
       const t = id !== "__none__" ? tch.get(id) : undefined;
+      const entry = id !== "__none__" ? unavailableEntry(unavailability, id) : null;
+      const reasonText = entry
+        ? `${reasonLabel(entry.reason)}${entry.note ? ` — ${entry.note}` : ""}`
+        : "";
       return {
         id,
         name: t?.full_name || "—",
         code: t?.teacher_code ?? "",
+        reasonText,
         rows: groupRows.sort(
           (a, b) => a.sortLabel.localeCompare(b.sortLabel) || a.period - b.period
         ),
@@ -230,6 +257,9 @@ export async function GET(req: NextRequest) {
                   <Text style={pdf.groupHeadingName}>
                     {g.code ? `${g.name}  (${g.code})` : g.name}
                   </Text>
+                  {g.reasonText !== "" && (
+                    <Text style={pdf.groupHeadingReason}>{g.reasonText}</Text>
+                  )}
                   <Text style={pdf.groupHeadingMeta}>
                     {`${g.rows.length} period(s) reassigned`}
                   </Text>

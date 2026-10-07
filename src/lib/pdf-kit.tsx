@@ -203,6 +203,7 @@ export const pdf = StyleSheet.create({
     borderBottomColor: "#0d9488",
   },
   groupHeadingName: { fontSize: 11, fontWeight: "bold", color: "#1e3a5f" },
+  groupHeadingReason: { marginLeft: 6, fontSize: 9, color: "#475569" },
   groupHeadingMeta: { marginLeft: "auto", fontSize: 8.5, color: "#64748b" },
 });
 
