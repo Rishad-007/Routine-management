@@ -44,11 +44,11 @@ export const dynamic = "force-dynamic";
  * painted on every other teacher's continuation.
  */
 const COLS: PdfCol[] = [
-  { label: "Class & Section", width: "32%" },
+  { label: "Class & Section", width: "26%" },
   { label: "Period", width: "8%", align: "center" },
   { label: "Subject", width: "27%" },
   { label: "New Assigned Teacher", width: "23%" },
-  { label: "Signature", width: "10%" },
+  { label: "Signature", width: "16%" },
 ];
 
 interface ReportRow {
@@ -212,15 +212,16 @@ export async function GET(req: NextRequest) {
   // fits, and it always moves whole.
   const PDFDoc = (
     <Document>
-      <Page size="A4" orientation="portrait" style={pdf.page}>
+      <Page size="A4" orientation="portrait" style={[pdf.page, { fontSize: 10 }]}>
         <DocHeader
           schoolName={SCHOOL_NAME_DEFAULT}
           title="Daily Adjustment Report — Adjust Class"
           subtitle={`Date: ${date} (${label}) · ${total} substitution(s), ${teacherCount} unavailable teacher(s)`}
+          subtitleStyle={pdf.docSubtitleLg}
         />
 
         {groups.length === 0 ? (
-          <EmptyState>No adjustments recorded for this date.</EmptyState>
+          <EmptyState style={pdf.emptyLg}>No adjustments recorded for this date.</EmptyState>
         ) : (
           <>
             {groups.map((g) => (
@@ -233,19 +234,20 @@ export async function GET(req: NextRequest) {
                     {`${g.rows.length} period(s) reassigned`}
                   </Text>
                 </View>
-                <TableHeader cols={COLS} repeat={false} />
+                <TableHeader cols={COLS} repeat={false} lg />
                 {g.rows.map((r, i) => (
                   <TableRow
                     key={`${g.id}-${r.sortLabel}-${r.period}-${r.subjectName}-${i}`}
                     cols={COLS}
                     striped={i % 2 === 1}
+                    lg
                     cells={[r.label, String(r.period), r.subjectName, r.newTeacher, ""]}
                   />
                 ))}
               </View>
             ))}
             <View style={{ marginTop: 8 }}>
-              <Text style={pdf.sectionNote}>
+              <Text style={pdf.sectionNoteLg}>
                 {`Total substitutions on this date: ${total}, grouped by the unavailable teacher who could not teach them. Initial one block, then pass the sheet to the class teacher.`}
               </Text>
             </View>

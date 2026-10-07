@@ -20,6 +20,11 @@ export const metadata: Metadata = {
   description: "Cantonment Public School & College, Rangpur — Routine Management",
   applicationName: "School Routine",
   manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "School Routine",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export const viewport: Viewport = {

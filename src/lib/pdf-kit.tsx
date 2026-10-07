@@ -1,5 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, View } from "@react-pdf/renderer";
+import type { StyleProp } from "@react-pdf/types";
 
 /**
  * Shared building blocks for the school's printed PDFs.
@@ -49,6 +50,12 @@ export const pdf = StyleSheet.create({
     fontSize: 9,
     color: "#334155",
   },
+  /** Larger subtitle, opt-in for reports that need more legible print. */
+  docSubtitleLg: {
+    textAlign: "center",
+    fontSize: 10.5,
+    color: "#334155",
+  },
   notice: {
     marginTop: 8,
     marginBottom: 10,
@@ -76,6 +83,12 @@ export const pdf = StyleSheet.create({
     fontSize: 7,
     color: "#64748b",
   },
+  /** Larger section note, opt-in for reports that need more legible print. */
+  sectionNoteLg: {
+    marginBottom: 6,
+    fontSize: 9,
+    color: "#64748b",
+  },
   row: { flexDirection: "row" },
   rowStriped: { backgroundColor: "#f8fafc" },
   headCell: {
@@ -89,6 +102,18 @@ export const pdf = StyleSheet.create({
     color: "#1e3a5f",
     backgroundColor: "#e2e8f0",
   },
+  /** Larger header cell, opt-in via TableHeader `lg`. */
+  headCellLg: {
+    borderStyle: "solid",
+    borderWidth: 0.5,
+    borderColor: "#cbd5e1",
+    paddingVertical: 7,
+    paddingHorizontal: 6,
+    fontSize: 9.5,
+    fontWeight: "bold",
+    color: "#1e3a5f",
+    backgroundColor: "#e2e8f0",
+  },
   bodyCell: {
     borderStyle: "solid",
     borderWidth: 0.5,
@@ -96,6 +121,16 @@ export const pdf = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 4,
     fontSize: 7.5,
+    color: "#334155",
+  },
+  /** Larger body cell, opt-in via TableRow `lg`. */
+  bodyCellLg: {
+    borderStyle: "solid",
+    borderWidth: 0.5,
+    borderColor: "#cbd5e1",
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    fontSize: 9.5,
     color: "#334155",
   },
   cellStrong: { fontWeight: "bold", color: "#1e3a5f" },
@@ -110,6 +145,12 @@ export const pdf = StyleSheet.create({
     textAlign: "center",
     fontSize: 8,
     color: "#94a3b8",
+  },
+  /** Larger empty-state message, opt-in via EmptyState `style`. */
+  emptyLg: {
+    marginTop: 12,
+    padding: 14,
+    fontSize: 9,
   },
   footer: {
     position: "absolute",
@@ -155,14 +196,14 @@ export const pdf = StyleSheet.create({
   groupHeading: {
     flexDirection: "row",
     alignItems: "flex-end",
-    marginTop: 9,
-    paddingBottom: 2,
+    marginTop: 11,
+    paddingBottom: 3,
     paddingLeft: 4,
     borderBottomWidth: 1,
     borderBottomColor: "#0d9488",
   },
-  groupHeadingName: { fontSize: 9, fontWeight: "bold", color: "#1e3a5f" },
-  groupHeadingMeta: { marginLeft: "auto", fontSize: 7, color: "#64748b" },
+  groupHeadingName: { fontSize: 11, fontWeight: "bold", color: "#1e3a5f" },
+  groupHeadingMeta: { marginLeft: "auto", fontSize: 8.5, color: "#64748b" },
 });
 
 export type ColAlign = "left" | "center" | "right";
@@ -178,16 +219,20 @@ export function DocHeader({
   schoolName,
   title,
   subtitle,
+  subtitleStyle,
 }: {
   schoolName: string;
   title: string;
   subtitle?: string;
+  subtitleStyle?: StyleProp;
 }) {
   return (
     <View>
       <Text style={pdf.schoolName}>{schoolName}</Text>
       <Text style={pdf.docTitle}>{title}</Text>
-      {subtitle ? <Text style={pdf.docSubtitle}>{subtitle}</Text> : null}
+      {subtitle ? (
+        <Text style={subtitleStyle ?? pdf.docSubtitle}>{subtitle}</Text>
+      ) : null}
     </View>
   );
 }
@@ -212,16 +257,22 @@ export function SectionNote({ children }: { children: React.ReactNode }) {
 export function TableHeader({
   cols,
   repeat = true,
+  lg = false,
 }: {
   cols: PdfCol[];
   repeat?: boolean;
+  /** Larger cells for more legible print. */
+  lg?: boolean;
 }) {
   return (
     <View style={pdf.row} fixed={repeat} wrap={false}>
       {cols.map((c) => (
         <View
           key={c.label}
-          style={[pdf.headCell, { width: c.width, textAlign: c.align ?? "left" }]}
+          style={[
+            lg ? pdf.headCellLg : pdf.headCell,
+            { width: c.width, textAlign: c.align ?? "left" },
+          ]}
         >
           <Text>{c.label}</Text>
         </View>
@@ -246,12 +297,15 @@ export function TableRow({
   cols,
   striped = false,
   strongFirst = false,
+  lg = false,
 }: {
   /** Positional cell contents, one per column. */
   cells: string[];
   cols: PdfCol[];
   striped?: boolean;
   strongFirst?: boolean;
+  /** Larger cells for more legible print. */
+  lg?: boolean;
 }) {
   return (
     <View
@@ -265,7 +319,7 @@ export function TableRow({
         <View
           key={c.label}
           style={[
-            pdf.bodyCell,
+            lg ? pdf.bodyCellLg : pdf.bodyCell,
             { width: c.width, textAlign: c.align ?? "left" },
             ...(strongFirst && i === 0 ? [pdf.cellStrong] : []),
           ]}
@@ -294,8 +348,14 @@ export function DocFooter({ note }: { note?: string }) {
   );
 }
 
-export function EmptyState({ children }: { children: React.ReactNode }) {
-  return <Text style={pdf.empty}>{children}</Text>;
+export function EmptyState({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp;
+}) {
+  return <Text style={style ? [pdf.empty, style] : pdf.empty}>{children}</Text>;
 }
 
 /** Small uppercase label above a number, used in the executive summary. */
