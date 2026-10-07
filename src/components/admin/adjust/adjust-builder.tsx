@@ -51,7 +51,11 @@ import {
   PERIOD_ORDER,
   TIFFIN_AFTER_PERIOD,
 } from "@/lib/constants";
-import { getSchoolDayIndex, getSchoolToday } from "@/lib/periods";
+import {
+  getSchoolDayIndex,
+  getSchoolToday,
+  getSchoolWeekRange,
+} from "@/lib/periods";
 import { buildTeacherRoutinePreview } from "@/lib/teacher-routine-preview";
 import {
   applyAdjustmentsToRoutines,
@@ -681,6 +685,54 @@ export function AdjustBuilder({
     ? dayCells.find((c) => c.period === sheetPeriod)
     : null;
 
+  // How many classes each teacher has TAKEN as a substitute this school week
+  // (Sun–Thu of the picked date — it resets on Sunday by construction).
+  //
+  // Saved rows from `adjustments` cover the whole week; the picked date's rows
+  // are re-keyed by cell so a staged `overrides`/`tagOverrides` pick replaces
+  // the saved holder instead of double-counting. That makes the badge move the
+  // instant a substitute is picked (before Save) and fall back on resetCell /
+  // resetAll, while Revert and Save stay correct via the refreshed prop.
+  const weekAdjCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!date) return map;
+    const { start, end } = getSchoolWeekRange(new Date(`${date}T00:00:00`));
+    const add = (teacherId: string | null | undefined) => {
+      if (teacherId) map.set(teacherId, (map.get(teacherId) ?? 0) + 1);
+    };
+
+    // cellKey -> new_teacher_id for the picked date, so staged picks can
+    // overwrite one cell without affecting the rest of the week.
+    const pickedDateCells = new Map<string, string | null>();
+    for (const a of adjustments) {
+      if (a.adjust_date < start || a.adjust_date > end) continue;
+      if (a.adjust_date === date) {
+        pickedDateCells.set(
+          `${a.section_id}:${a.period_number}:${a.is_tag ? 1 : 0}`,
+          a.new_teacher_id,
+        );
+        continue;
+      }
+      add(a.new_teacher_id);
+    }
+
+    // Stage the unsaved picks on top of that date's saved cells.
+    for (const [period, o] of Object.entries(overrides)) {
+      pickedDateCells.set(`${o.sectionId}:${period}:0`, o.newTeacherId);
+    }
+    for (const [period, to] of Object.entries(tagOverrides)) {
+      const cell = dayCells.find((c) => c.period === Number(period));
+      if (!cell) continue;
+      pickedDateCells.set(
+        `${cell.sectionId}:${period}:1`,
+        to.newTeacherId,
+      );
+    }
+
+    for (const teacherId of pickedDateCells.values()) add(teacherId);
+    return map;
+  }, [adjustments, date, overrides, tagOverrides, dayCells]);
+
   const sheetTeacherRows = useMemo(() => {
     if (sheetPeriod === null || dayIndex === null) return [];
     return teachers
@@ -689,6 +741,7 @@ export function AdjustBuilder({
         dayCount: dayCountIndexed(pendingIndex, t.id, dayIndex),
         stretch: stretchIndexed(pendingIndex, t.id, dayIndex),
         weekTotal: pendingIndex.weeklyTotal.get(t.id) ?? 0,
+        adjCount: weekAdjCounts.get(t.id) ?? 0,
         busy: busyTeachersForPeriod.has(t.id),
         // True when this teacher holds the cell only because of a saved
         // substitution, so the sheet can separate a genuine weekly class from
@@ -736,6 +789,7 @@ export function AdjustBuilder({
     sheetSubjectFilter,
     sheetSubjectTeacherIds,
     unavailIndex,
+    weekAdjCounts,
   ]);
 
   const searchedSheetTeachers = useMemo(() => {
@@ -2371,14 +2425,28 @@ export function AdjustBuilder({
                                   </span>
                                 )}
                               </span>
-                              <div className="flex items-center gap-2 text-xs text-slate-500">
-                                <span>{t.dayCount}P day</span>
-                                <span>·</span>
-                                <span>
+                              <div className="flex items-center gap-1.5 text-xs">
+                                <span
+                                  className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 ring-1 ring-amber-300"
+                                  title="Substitutes taken this week (Sun–Thu)"
+                                >
+                                  adj-{t.adjCount}
+                                </span>
+                                <span
+                                  className="rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700"
+                                  title="Classes on this day"
+                                >
+                                  D-{t.dayCount}p
+                                </span>
+                                <span className="text-slate-400">
                                   {t.stretch >= 3 ? `${t.stretch} cont` : "—"}
                                 </span>
-                                <span>·</span>
-                                <span>{t.weekTotal}P wk</span>
+                                <span
+                                  className="rounded bg-[#1e3a5f]/10 px-1.5 py-0.5 font-medium text-[#1e3a5f]"
+                                  title="Total classes this week"
+                                >
+                                  wk-{t.weekTotal}P
+                                </span>
                               </div>
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
@@ -2487,10 +2555,25 @@ export function AdjustBuilder({
                                         </span>
                                       )}
                                     </span>
-                                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                                      <span>{t.dayCount}P day</span>
-                                      <span>·</span>
-                                      <span>{t.weekTotal}P wk</span>
+                                    <div className="flex items-center gap-1.5 text-xs">
+                                      <span
+                                        className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 ring-1 ring-amber-300"
+                                        title="Substitutes taken this week (Sun–Thu)"
+                                      >
+                                        adj-{t.adjCount}
+                                      </span>
+                                      <span
+                                        className="rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700"
+                                        title="Classes on this day"
+                                      >
+                                        D-{t.dayCount}p
+                                      </span>
+                                      <span
+                                        className="rounded bg-[#1e3a5f]/10 px-1.5 py-0.5 font-medium text-[#1e3a5f]"
+                                        title="Total classes this week"
+                                      >
+                                        wk-{t.weekTotal}P
+                                      </span>
                                     </div>
                                   </div>
                                   <div className="mt-1 text-xs text-red-600">
