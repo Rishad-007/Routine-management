@@ -7,7 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { RoutineGrid, type RoutineMatrix } from "@/components/routine/routine-grid";
+import {
+  RoutineGrid,
+  type RoutineMatrix,
+} from "@/components/routine/routine-grid";
 import type { Season } from "@/lib/constants";
 import type { TeacherRow } from "@/lib/types";
 
@@ -29,7 +32,7 @@ export function TeacherRoutineViewer({
   const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState<string>(() => {
     const matched = teachers.find(
-      (t) => t.teacher_code.toLowerCase() === initialQuery.toLowerCase()
+      (t) => t.teacher_code.toLowerCase() === initialQuery.toLowerCase(),
     );
     return matched?.id ?? "";
   });
@@ -40,9 +43,9 @@ export function TeacherRoutineViewer({
       teachers.filter(
         (t) =>
           t.full_name.toLowerCase().includes(query.toLowerCase()) ||
-          t.teacher_code.toLowerCase().includes(query.toLowerCase())
+          t.teacher_code.toLowerCase().includes(query.toLowerCase()),
       ),
-    [teachers, query]
+    [teachers, query],
   );
 
   const matrix = selected ? matrices[selected] : undefined;
@@ -78,7 +81,9 @@ export function TeacherRoutineViewer({
         {/* Page header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-[#1e3a5f]">Teacher Routine</h1>
+            <h1 className="text-2xl font-bold text-[#1e3a5f]">
+              Teacher Routine
+            </h1>
             <p className="text-sm text-slate-500">
               Search by teacher ID or full name.
             </p>
@@ -132,10 +137,22 @@ export function TeacherRoutineViewer({
                       <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#1e3a5f]/10 text-xs font-bold text-[#1e3a5f]">
                         {initials(t.full_name)}
                       </span>
-                      <span className={isSel ? "font-medium text-white" : "font-medium text-[#1e3a5f]"}>
+                      <span
+                        className={
+                          isSel
+                            ? "font-medium text-white"
+                            : "font-medium text-[#1e3a5f]"
+                        }
+                      >
                         {t.full_name}
                       </span>
-                      <span className={isSel ? "text-xs text-teal-100" : "text-xs text-slate-400"}>
+                      <span
+                        className={
+                          isSel
+                            ? "text-xs text-teal-100"
+                            : "text-xs text-slate-400"
+                        }
+                      >
                         ({t.teacher_code})
                       </span>
                     </button>
@@ -169,7 +186,9 @@ export function TeacherRoutineViewer({
                   <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
                     <CalendarDays className="h-3.5 w-3.5" />
                     Weekly routine ·{" "}
-                    {selectedTeacher?.primary_subject_id ? "Staff" : "Open teacher"}
+                    {selectedTeacher?.primary_subject_id
+                      ? "Staff"
+                      : "Open teacher"}
                     {selectedTeacher?.is_open_teacher ? " (open)" : ""}
                   </p>
                 </div>

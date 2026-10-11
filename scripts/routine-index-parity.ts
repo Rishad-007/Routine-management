@@ -44,65 +44,95 @@ async function readAllRoutines(): Promise<RoutineRow[]> {
 }
 
 async function main() {
-const routines = await readAllRoutines();
+  const routines = await readAllRoutines();
 
-const { count: exactCount } = await db
-  .from("routines")
-  .select("id", { count: "exact", head: true });
-const { data: unpaged } = await db.from("routines").select("id");
+  const { data: teacher340 } = await db
+    .from("teachers")
+    .select("id, teacher_code")
+    .eq("teacher_code", "340")
+    .maybeSingle();
 
-const teacherIds = [
-  ...new Set(routines.map((r) => r.teacher_id).filter(Boolean)),
-] as string[];
+  const { count: exactCount } = await db
+    .from("routines")
+    .select("id", { count: "exact", head: true });
+  const { data: unpaged } = await db.from("routines").select("id");
 
-const index = buildRoutineIndex(routines);
-const failures: string[] = [];
+  const teacherIds = [
+    ...new Set(routines.map((r) => r.teacher_id).filter(Boolean)),
+  ] as string[];
 
-for (const teacherId of teacherIds) {
-  for (const day of DAYS) {
-    const a = countDayPeriods(routines, teacherId, day);
-    const b = dayCountIndexed(index, teacherId, day);
-    if (a !== b) failures.push(`dayCount ${teacherId} d${day}: ${a} != ${b}`);
+  const index = buildRoutineIndex(routines);
+  const failures: string[] = [];
 
-    const c = longestConsecutiveStretch(routines, teacherId, day);
-    const d = stretchIndexed(index, teacherId, day);
-    if (c !== d) failures.push(`stretch ${teacherId} d${day}: ${c} != ${d}`);
+  for (const teacherId of teacherIds) {
+    for (const day of DAYS) {
+      const a = countDayPeriods(routines, teacherId, day);
+      const b = dayCountIndexed(index, teacherId, day);
+      if (a !== b) failures.push(`dayCount ${teacherId} d${day}: ${a} != ${b}`);
 
-    for (const period of PERIOD_NUMBERS) {
-      const e = isTeacherBusy(routines, teacherId, day, period);
-      const f = isBusyIndexed(index, teacherId, day, period);
-      if (e !== f) failures.push(`busy ${teacherId} d${day}p${period}: ${e} != ${f}`);
+      const c = longestConsecutiveStretch(routines, teacherId, day);
+      const d = stretchIndexed(index, teacherId, day);
+      if (c !== d) failures.push(`stretch ${teacherId} d${day}: ${c} != ${d}`);
+
+      for (const period of PERIOD_NUMBERS) {
+        const e = isTeacherBusy(routines, teacherId, day, period);
+        const f = isBusyIndexed(index, teacherId, day, period);
+        if (e !== f)
+          failures.push(`busy ${teacherId} d${day}p${period}: ${e} != ${f}`);
+      }
     }
   }
-}
 
-const scanLoads = allTeacherLoads(routines);
-const idxLoads = allTeacherLoadsIndexed(index);
-if (scanLoads.size !== idxLoads.size) {
-  failures.push(`allTeacherLoads size: ${scanLoads.size} != ${idxLoads.size}`);
-}
-for (const [teacherId, loads] of scanLoads) {
-  const other = idxLoads.get(teacherId) ?? [];
-  const norm = (l: typeof loads) =>
-    JSON.stringify([...l].sort((x, y) => x.day - y.day));
-  if (norm(loads) !== norm(other)) failures.push(`loads differ for ${teacherId}`);
-}
+  const scanLoads = allTeacherLoads(routines);
+  const idxLoads = allTeacherLoadsIndexed(index);
+  if (scanLoads.size !== idxLoads.size) {
+    failures.push(
+      `allTeacherLoads size: ${scanLoads.size} != ${idxLoads.size}`,
+    );
+  }
+  for (const [teacherId, loads] of scanLoads) {
+    const other = idxLoads.get(teacherId) ?? [];
+    const norm = (l: typeof loads) =>
+      JSON.stringify([...l].sort((x, y) => x.day - y.day));
+    if (norm(loads) !== norm(other))
+      failures.push(`loads differ for ${teacherId}`);
+  }
 
-console.log(`rows via paged read        : ${routines.length}`);
-console.log(`rows via exact count       : ${exactCount}`);
-console.log(`rows via unbounded select  : ${unpaged?.length ?? 0}  <- the bug`);
-console.log(`teachers x days x periods  : ${teacherIds.length * DAYS.length * PERIOD_NUMBERS.length} comparisons`);
+  console.log(`rows via paged read        : ${routines.length}`);
+  console.log(`rows via exact count       : ${exactCount}`);
+  console.log(
+    `rows via unbounded select  : ${unpaged?.length ?? 0}  <- the bug`,
+  );
+  console.log(
+    `teachers x days x periods  : ${teacherIds.length * DAYS.length * PERIOD_NUMBERS.length} comparisons`,
+  );
 
-if (routines.length !== exactCount) {
-  failures.push(`paged read got ${routines.length}, expected ${exactCount}`);
-}
+  if (teacher340) {
+    const mondayPeriodSix = routines.some(
+      (r) =>
+        r.teacher_id === teacher340.id && r.day === 1 && r.period_number === 6,
+    );
+    console.log(
+      `teacher 340 Monday period 6: ${mondayPeriodSix ? "present" : "MISSING"}`,
+    );
+    if (!mondayPeriodSix)
+      failures.push(
+        "teacher 340 Monday period 6 is missing from the complete routine read",
+      );
+  } else {
+    console.log("teacher 340 Monday period 6: teacher code not found");
+  }
 
-if (failures.length) {
-  console.error(`\nFAIL (${failures.length}):`);
-  for (const f of failures.slice(0, 20)) console.error("  " + f);
-  process.exit(1);
-}
-console.log("\nPASS - indexed helpers match the scanning helpers exactly.");
+  if (routines.length !== exactCount) {
+    failures.push(`paged read got ${routines.length}, expected ${exactCount}`);
+  }
+
+  if (failures.length) {
+    console.error(`\nFAIL (${failures.length}):`);
+    for (const f of failures.slice(0, 20)) console.error("  " + f);
+    process.exit(1);
+  }
+  console.log("\nPASS - indexed helpers match the scanning helpers exactly.");
 }
 
 main().catch((e) => {
