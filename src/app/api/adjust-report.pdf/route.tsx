@@ -50,11 +50,11 @@ export const dynamic = "force-dynamic";
  * painted on every other teacher's continuation.
  */
 const COLS: PdfCol[] = [
-  { label: "Class & Section", width: "26%" },
-  { label: "Period", width: "8%", align: "center" },
-  { label: "Subject", width: "27%" },
-  { label: "New Assigned Teacher", width: "23%" },
-  { label: "Signature", width: "16%" },
+  { label: "Class & Section", width: "27%" },
+  { label: "Period", width: "7%", align: "center" },
+  { label: "Subject", width: "28%" },
+  { label: "New Assigned Teacher", width: "24%" },
+  { label: "Signature", width: "14%" },
 ];
 
 interface ReportRow {
@@ -239,12 +239,14 @@ export async function GET(req: NextRequest) {
   // fits, and it always moves whole.
   const PDFDoc = (
     <Document>
-      <Page size="A4" orientation="portrait" style={[pdf.page, { fontSize: 10 }]}>
+      <Page size="LEGAL" orientation="portrait" style={[pdf.page, { fontSize: 12 }]}>
         <DocHeader
           schoolName={SCHOOL_NAME_DEFAULT}
           title="Daily Adjustment Report — Adjust Class"
           subtitle={`Date: ${date} (${label}) · ${total} substitution(s), ${teacherCount} unavailable teacher(s)`}
           subtitleStyle={pdf.docSubtitleLg}
+          schoolNameStyle={pdf.schoolNameLg}
+          titleStyle={pdf.docTitleLg}
         />
 
         {groups.length === 0 ? (

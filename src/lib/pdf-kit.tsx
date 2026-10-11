@@ -53,8 +53,24 @@ export const pdf = StyleSheet.create({
   /** Larger subtitle, opt-in for reports that need more legible print. */
   docSubtitleLg: {
     textAlign: "center",
-    fontSize: 10.5,
+    fontSize: 12.5,
     color: "#334155",
+  },
+  /** Larger school name, opt-in via DocHeader `schoolNameStyle`. */
+  schoolNameLg: {
+    textAlign: "center",
+    fontWeight: "bold",
+    fontSize: 16,
+    color: "#1e3a5f",
+    marginBottom: 2,
+  },
+  /** Larger document title, opt-in via DocHeader `titleStyle`. */
+  docTitleLg: {
+    textAlign: "center",
+    fontWeight: "bold",
+    fontSize: 13.5,
+    color: "#0d9488",
+    marginBottom: 2,
   },
   notice: {
     marginTop: 8,
@@ -86,7 +102,7 @@ export const pdf = StyleSheet.create({
   /** Larger section note, opt-in for reports that need more legible print. */
   sectionNoteLg: {
     marginBottom: 6,
-    fontSize: 9,
+    fontSize: 11,
     color: "#64748b",
   },
   row: { flexDirection: "row" },
@@ -107,9 +123,9 @@ export const pdf = StyleSheet.create({
     borderStyle: "solid",
     borderWidth: 0.5,
     borderColor: "#cbd5e1",
-    paddingVertical: 7,
-    paddingHorizontal: 6,
-    fontSize: 9.5,
+    paddingVertical: 9,
+    paddingHorizontal: 8,
+    fontSize: 12,
     fontWeight: "bold",
     color: "#1e3a5f",
     backgroundColor: "#e2e8f0",
@@ -128,9 +144,9 @@ export const pdf = StyleSheet.create({
     borderStyle: "solid",
     borderWidth: 0.5,
     borderColor: "#cbd5e1",
-    paddingVertical: 6,
-    paddingHorizontal: 6,
-    fontSize: 9.5,
+    paddingVertical: 9,
+    paddingHorizontal: 8,
+    fontSize: 12,
     color: "#334155",
   },
   cellStrong: { fontWeight: "bold", color: "#1e3a5f" },
@@ -150,7 +166,7 @@ export const pdf = StyleSheet.create({
   emptyLg: {
     marginTop: 12,
     padding: 14,
-    fontSize: 9,
+    fontSize: 11,
   },
   footer: {
     position: "absolute",
@@ -202,9 +218,9 @@ export const pdf = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#0d9488",
   },
-  groupHeadingName: { fontSize: 11, fontWeight: "bold", color: "#1e3a5f" },
-  groupHeadingReason: { marginLeft: 6, fontSize: 9, color: "#475569" },
-  groupHeadingMeta: { marginLeft: "auto", fontSize: 8.5, color: "#64748b" },
+  groupHeadingName: { fontSize: 14, fontWeight: "bold", color: "#1e3a5f" },
+  groupHeadingReason: { marginLeft: 6, fontSize: 11.5, color: "#475569" },
+  groupHeadingMeta: { marginLeft: "auto", fontSize: 10.5, color: "#64748b" },
 });
 
 export type ColAlign = "left" | "center" | "right";
@@ -221,16 +237,20 @@ export function DocHeader({
   title,
   subtitle,
   subtitleStyle,
+  schoolNameStyle,
+  titleStyle,
 }: {
   schoolName: string;
   title: string;
   subtitle?: string;
   subtitleStyle?: StyleProp;
+  schoolNameStyle?: StyleProp;
+  titleStyle?: StyleProp;
 }) {
   return (
     <View>
-      <Text style={pdf.schoolName}>{schoolName}</Text>
-      <Text style={pdf.docTitle}>{title}</Text>
+      <Text style={schoolNameStyle ?? pdf.schoolName}>{schoolName}</Text>
+      <Text style={titleStyle ?? pdf.docTitle}>{title}</Text>
       {subtitle ? (
         <Text style={subtitleStyle ?? pdf.docSubtitle}>{subtitle}</Text>
       ) : null}
