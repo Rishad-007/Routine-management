@@ -12,6 +12,7 @@ import {
   UserCheck,
   UserPlus,
   UserX,
+  Gauge,
   BarChart3,
   FileDown,
   Globe,
@@ -40,6 +41,7 @@ const MANAGE_ITEMS: NavItem[] = [
   { href: "/admin/routine", label: "Update Routine", icon: CalendarRange },
   { href: "/admin/assign", label: "Assign Classes", icon: UserPlus },
   { href: "/admin/free-teachers", label: "Free Teachers", icon: UserCheck },
+  { href: "/admin/teacher-load", label: "Teacher Load", icon: Gauge },
   { href: "/admin/teacher-unavailability", label: "Mark Unavailable", icon: CalendarX2 },
   { href: "/admin/adjust", label: "Adjust Routine", icon: SlidersHorizontal },
 ];
