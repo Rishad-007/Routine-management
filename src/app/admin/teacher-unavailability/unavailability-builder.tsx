@@ -20,14 +20,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PeriodStrip } from "@/components/admin/period-strip";
 import { DAY_LABEL_LIST, PERIOD_ORDER } from "@/lib/constants";
-import type {
-  TeacherRow,
-  TeacherUnavailabilityRow,
-  UnavailableReason,
+import {
+  UNAVAILABLE_REASONS,
+  type TeacherRow,
+  type TeacherUnavailabilityRow,
+  type UnavailableReason,
 } from "@/lib/types";
 import {
   UNAVAILABLE_REASON_LABELS,
-  reasonLabel,
   unavailableEntry,
   unavailablePeriods,
   unavailabilityIndex,
@@ -44,6 +44,40 @@ interface Props {
   rows: TeacherUnavailabilityRow[];
   busyLabels: BusyLabels;
 }
+
+/**
+ * Colour accent per unavailability reason, so the recorded panel's groups can be
+ * told apart at a glance and stay consistent with each other in every render.
+ */
+const REASON_ACCENT: Record<
+  UnavailableReason,
+  { dot: string; text: string; pill: string; border: string }
+> = {
+  on_leave: {
+    dot: "bg-violet-500",
+    text: "text-violet-700",
+    pill: "bg-violet-100 text-violet-700",
+    border: "border-l-violet-400",
+  },
+  exam_duty: {
+    dot: "bg-amber-500",
+    text: "text-amber-700",
+    pill: "bg-amber-100 text-amber-700",
+    border: "border-l-amber-400",
+  },
+  official_work: {
+    dot: "bg-teal-500",
+    text: "text-teal-700",
+    pill: "bg-teal-100 text-teal-700",
+    border: "border-l-teal-400",
+  },
+  other: {
+    dot: "bg-slate-400",
+    text: "text-slate-600",
+    pill: "bg-slate-100 text-slate-600",
+    border: "border-l-slate-300",
+  },
+};
 
 export function UnavailabilityBuilder({
   date,
@@ -104,7 +138,7 @@ export function UnavailabilityBuilder({
       teacher: TeacherRow;
       periods: number[];
       wholeDay: boolean;
-      reason: string;
+      reason: UnavailableReason;
       note: string | null;
     }[] = [];
     for (const teacher of teachers) {
@@ -114,12 +148,23 @@ export function UnavailabilityBuilder({
         teacher,
         periods: unavailablePeriods(index, teacher.id),
         wholeDay: entry.isWholeDay,
-        reason: reasonLabel(entry.reason),
+        reason: entry.reason,
         note: entry.note,
       });
     }
     return out.sort((a, b) => a.teacher.full_name.localeCompare(b.teacher.full_name));
   }, [index, teachers]);
+
+  // Group the recorded teachers by reason, in the canonical reason order so the
+  // panel reads consistently with the reason picker above.
+  const groupedRecorded = useMemo(
+    () =>
+      UNAVAILABLE_REASONS.map((reason) => ({
+        reason,
+        rows: recorded.filter((r) => r.reason === reason),
+      })).filter((group) => group.rows.length > 0),
+    [recorded],
+  );
 
   // Presence in `busyLabels` is the busy signal, so the set is just its keys.
   const busySet = useMemo(() => {
@@ -477,52 +522,85 @@ export function UnavailabilityBuilder({
               </p>
             </div>
           ) : (
-            <ul className="space-y-2">
-              {recorded.map((row) => (
-                <li
-                  key={row.teacher.id}
-                  className={cn(
-                    "rounded-lg border p-3 transition-colors",
-                    row.teacher.id === teacherId
-                      ? "border-[#1e3a5f] bg-slate-50"
-                      : "border-slate-200",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setTeacherId(row.teacher.id)}
-                      className="min-w-0 flex-1 text-left"
-                    >
-                      <p className="truncate text-sm font-medium text-slate-800">
-                        {row.teacher.full_name}
+            <div className="space-y-4">
+              {groupedRecorded.map((group) => {
+                const accent = REASON_ACCENT[group.reason];
+                return (
+                  <div
+                    key={group.reason}
+                    className={cn("space-y-2 border-l-2 pl-3", accent.border)}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p
+                        className={cn(
+                          "flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide",
+                          accent.text,
+                        )}
+                      >
+                        <span
+                          className={cn("h-2 w-2 rounded-full", accent.dot)}
+                        />
+                        {UNAVAILABLE_REASON_LABELS[group.reason]}
                       </p>
-                      <p className="text-xs text-slate-500">
-                        {row.wholeDay ? "Whole day" : row.periods.join(", ")}
-                        {" · "}
-                        {row.reason}
-                      </p>
-                      {row.note && (
-                        <p className="mt-1 truncate text-xs text-slate-400">
-                          {row.note}
-                        </p>
-                      )}
-                    </button>
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                          accent.pill,
+                        )}
+                      >
+                        {group.rows.length}
+                      </span>
+                    </div>
+                    <ul className="space-y-2">
+                      {group.rows.map((row) => (
+                        <li
+                          key={row.teacher.id}
+                          className={cn(
+                            "rounded-lg border p-3 transition-colors",
+                            row.teacher.id === teacherId
+                              ? "border-[#1e3a5f] bg-slate-50"
+                              : "border-slate-200",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setTeacherId(row.teacher.id)}
+                              className="min-w-0 flex-1 text-left"
+                            >
+                              <p className="truncate text-sm font-medium text-slate-800">
+                                {row.teacher.full_name}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {row.wholeDay
+                                  ? "Whole day"
+                                  : row.periods.join(", ")}
+                              </p>
+                              {row.note && (
+                                <p className="mt-1 truncate text-xs text-slate-400">
+                                  {row.note}
+                                </p>
+                              )}
+                            </button>
 
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      title="Remove this record"
-                      disabled={pending}
-                      onClick={() => setClearTarget(row.teacher)}
-                    >
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              title="Remove this record"
+                              disabled={pending}
+                              onClick={() => setClearTarget(row.teacher)}
+                            >
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                </li>
-              ))}
-            </ul>
+                );
+              })}
+            </div>
           )}
         </aside>
       </div>
