@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import React from "react";
 import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT, type Season } from "@/lib/constants";
-import { getSchoolWeekRange } from "@/lib/periods";
+import { DAY_LABEL_LIST, SCHOOL_NAME_DEFAULT } from "@/lib/constants";
+import { getCurrentSeason, getSchoolWeekRange } from "@/lib/periods";
 import { fetchAllRows, type PagedQuery } from "@/lib/data";
 import { buildTeacherMatrix, buildWeekOverrides } from "@/lib/routine-view";
 import { filterSuspendedRoutines } from "@/lib/suspensions";
@@ -107,7 +107,7 @@ export async function GET(req: NextRequest) {
   const week = getSchoolWeekRange();
 
   // `routines` is 3000+ rows — paged, or the PDF silently omits most periods.
-  const [teaRes, clsRes, secRes, subRes, roomRes, allRoutines, adjRes, seasonRes, teacherRes] =
+  const [teaRes, clsRes, secRes, subRes, roomRes, allRoutines, adjRes, teacherRes] =
     await Promise.all([
       admin.from("teachers").select("*").eq("id", teacherId).single(),
       admin.from("classes").select("*"),
@@ -125,7 +125,7 @@ export async function GET(req: NextRequest) {
         .select("*")
         .gte("adjust_date", week.start)
         .lte("adjust_date", week.end),
-      admin.from("settings").select("value").eq("key", "season").maybeSingle(),
+
       // Every teacher, so a cover can be attributed to the teacher it displaces.
       admin.from("teachers").select("id, full_name"),
     ]);
@@ -142,7 +142,7 @@ export async function GET(req: NextRequest) {
   // A suspended class does not run, so it must not appear on the teacher's PDF.
   const routines = filterSuspendedRoutines(allRoutines, sections, classes);
   const adjustments = (adjRes.data ?? []) as AdjustmentRow[];
-  const season = ((seasonRes.data?.value as Season) ?? "summer") as Season;
+  const season = getCurrentSeason();
 
   const todayPrimaryOverrides = buildWeekOverrides(
     adjustments,

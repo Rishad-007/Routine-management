@@ -5,13 +5,12 @@ import {
   getClasses,
   getSubjects,
   getRooms,
-  getSetting,
+
   getAdjustmentsForWeek,
 } from "@/lib/data";
 import { buildTeacherMatrix, buildWeekOverrides } from "@/lib/routine-view";
 import { filterSuspendedRoutines } from "@/lib/suspensions";
-import { getSchoolWeekRange } from "@/lib/periods";
-import type { Season } from "@/lib/constants";
+import { getCurrentSeason, getSchoolWeekRange } from "@/lib/periods";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
 import { TeacherRoutineViewer } from "@/components/public/teacher-routine-viewer";
 
@@ -32,7 +31,6 @@ export default async function TeacherPage({
     classes,
     subjects,
     rooms,
-    season,
     adjustments,
   ] = await Promise.all([
     getTeachers(),
@@ -41,7 +39,6 @@ export default async function TeacherPage({
     getClasses(),
     getSubjects(),
     getRooms(),
-    getSetting("season"),
     getAdjustmentsForWeek(week),
   ]);
 
@@ -81,7 +78,7 @@ export default async function TeacherPage({
       teachers={teachers}
       matrices={matrices}
       teacherMeta={teacherMeta}
-      season={(season as Season) ?? "summer"}
+      season={getCurrentSeason()}
       initialQuery={params.q ?? ""}
     />
   );

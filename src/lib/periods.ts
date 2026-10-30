@@ -8,23 +8,40 @@ import {
   type ZonedParts,
 } from "./school-time";
 
-// Durations in minutes (same for summer & winter)
-const PERIOD_DURATIONS: Record<number, number> = {
-  1: 35,
-  2: 40,
-  3: 40,
-  4: 40,
-  5: 45,
-  6: 40,
-  7: 40,
+// Durations in minutes. Winter follows the school's published 40-minute
+// period timetable; summer keeps the existing schedule.
+const PERIOD_DURATIONS: Record<Season, Record<number, number>> = {
+  summer: {
+    1: 35,
+    2: 40,
+    3: 40,
+    4: 40,
+    5: 45,
+    6: 40,
+    7: 40,
+  },
+  winter: {
+    1: 40,
+    2: 40,
+    3: 40,
+    4: 40,
+    5: 40,
+    6: 40,
+    7: 40,
+  },
 };
 const TIFFIN_DURATION = 20;
 
 // Start times (HH:MM) per season
 const SEASON_START: Record<Season, string> = {
   summer: "08:30",
-  winter: "09:10",
+  winter: "09:05",
 };
+
+/** Winter timetable starts automatically on November 1 at the school. */
+export function getCurrentSeason(reference: Date = new Date()): Season {
+  return getZonedParts(reference).month >= 11 ? "winter" : "summer";
+}
 
 interface TimeBlock {
   label: string; // "Period 1" | "Tiffin"
@@ -58,7 +75,7 @@ export function buildSchedule(season: Season, reference: Date): TimeBlock[] {
 
   for (const p of PERIOD_ORDER) {
     const startLabel = formatMinutes(cursor);
-    const duration = PERIOD_DURATIONS[p];
+    const duration = PERIOD_DURATIONS[season][p];
     cursor += duration;
     const endLabel = formatMinutes(cursor);
     blocks.push({

@@ -6,10 +6,8 @@ import {
   getRooms,
   getRoutines,
   getAdjustments,
-  getSetting,
 } from "@/lib/data";
-import type { Season } from "@/lib/constants";
-import { getSchoolDayIndexNow, getSchoolToday } from "@/lib/periods";
+import { getCurrentSeason, getSchoolDayIndexNow, getSchoolToday } from "@/lib/periods";
 import { HomeContent } from "@/components/public/home-content";
 
 // The board's contents depend on the current day and period, so an ISR snapshot
@@ -20,7 +18,7 @@ import { HomeContent } from "@/components/public/home-content";
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [classes, sections, teachers, subjects, rooms, routines, adjustments, season] =
+  const [classes, sections, teachers, subjects, rooms, routines, adjustments] =
     await Promise.all([
       getClasses(),
       getSections(),
@@ -29,7 +27,6 @@ export default async function HomePage() {
       getRooms(),
       getRoutines(),
       getAdjustments(getSchoolToday()),
-      getSetting("season"),
     ]);
 
   const now = new Date();
@@ -54,7 +51,7 @@ export default async function HomePage() {
       rooms={rooms}
       todayRows={todayRows}
       adjustments={adjustments}
-      season={(season as Season) ?? "summer"}
+      season={getCurrentSeason(now)}
       today={today}
     />
   );

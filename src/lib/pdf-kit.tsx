@@ -183,7 +183,7 @@ export const pdf = StyleSheet.create({
   pageNumber: {
     marginLeft: "auto",
     fontSize: 7,
-    color: "#94a3b8",
+    color: "#334155",
   },
   summaryGrid: { flexDirection: "row", flexWrap: "wrap" },
   summaryCell: {

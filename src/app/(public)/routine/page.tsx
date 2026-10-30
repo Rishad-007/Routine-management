@@ -5,7 +5,7 @@ import {
   getTeachers,
   getSubjects,
   getRooms,
-  getSetting,
+
   getAdjustmentsForWeek,
 } from "@/lib/data";
 import { buildSectionMatrix, buildWeekOverrides } from "@/lib/routine-view";
@@ -13,8 +13,7 @@ import {
   suspendedClassIdSet,
   suspendedClassReasons,
 } from "@/lib/suspensions";
-import { getSchoolWeekRange } from "@/lib/periods";
-import type { Season } from "@/lib/constants";
+import { getCurrentSeason, getSchoolWeekRange } from "@/lib/periods";
 import type { RoutineMatrix } from "@/components/routine/routine-grid";
 import { RoutineViewer } from "@/components/public/routine-viewer";
 
@@ -29,7 +28,7 @@ export default async function RoutinePage({
   // Substitutions are live only for the current school week, so fetch just that
   // window rather than every adjustment ever made.
   const week = getSchoolWeekRange();
-  const [classes, sections, routines, teachers, subjects, rooms, season, adjustments] =
+  const [classes, sections, routines, teachers, subjects, rooms, adjustments] =
     await Promise.all([
       getClasses(),
       getSections(),
@@ -37,7 +36,6 @@ export default async function RoutinePage({
       getTeachers(),
       getSubjects(),
       getRooms(),
-      getSetting("season"),
       getAdjustmentsForWeek(week),
     ]);
 
@@ -76,7 +74,7 @@ export default async function RoutinePage({
         initialSectionId={params.section}
         initialClassId={params.class}
         matrices={matrices}
-        season={(season as Season) ?? "summer"}
+        season={getCurrentSeason()}
         suspendedClassIds={[...suspendedClassIdSet(classes)]}
         suspensionReasons={Object.fromEntries(suspendedClassReasons(classes))}
       />

@@ -34,7 +34,6 @@ import {
   getRoutines,
   getRooms,
   getSections,
-  getSetting,
   getSubjects,
   getTeachers,
   getTeacherUnavailability,
@@ -48,12 +47,12 @@ import {
 import { getReportRange } from "@/lib/report-range";
 import {
   getCurrentPeriod,
+  getCurrentSeason,
   getSchoolDayIndexNow,
   getSchoolToday,
 } from "@/lib/periods";
 import { getZonedParts } from "@/lib/school-time";
 import { DAY_LABEL_LIST, DAY_ORDER } from "@/lib/constants";
-import type { Season } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { RoutineCoverageChart } from "@/components/admin/dashboard/routine-coverage-chart";
 import { TeacherWorkloadChart } from "@/components/admin/dashboard/teacher-workload-chart";
@@ -127,7 +126,6 @@ export default async function AdminDashboardPage() {
     routines,
     adjustments,
     allAdjustments,
-    season,
     unavailability,
   ] = await Promise.all([
     getClasses(),
@@ -138,11 +136,10 @@ export default async function AdminDashboardPage() {
     getRoutines(),
     getAdjustments(getSchoolToday()),
     getAllAdjustments(),
-    getSetting("season"),
     getTeacherUnavailability(),
   ]);
 
-  const selectedSeason = (season as Season) ?? "summer";
+  const selectedSeason = getCurrentSeason();
   const todayStr = getSchoolToday();
   const now = new Date();
   const dayIndex = getSchoolDayIndexNow(now);
@@ -285,7 +282,7 @@ export default async function AdminDashboardPage() {
 
   const seasonLabel =
     selectedSeason === "winter"
-      ? "Winter schedule · starts 09:10"
+      ? "Winter schedule · starts 09:05"
       : "Summer schedule · starts 08:30";
 
   const periodNow = getCurrentPeriod(now, selectedSeason);
