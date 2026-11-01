@@ -213,3 +213,4 @@ The app is installable (manifest + theme color + `apple-icon.png`) with a networ
 Deployed on **Vercel**. After adding the environment variables above, deploy and trigger a redeploy (Vercel inlines `NEXT_PUBLIC_*` at build time).
 
 Created by **MD. Rishad Nur** (Assistant Teacher, ICT) & the ICT Department, Cantonment Public School & College, Rangpur.
+mail: rishad.nur007@gmail.com
